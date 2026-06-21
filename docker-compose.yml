@@ -1,0 +1,27 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: momoguard
+      POSTGRES_PASSWORD: momoguard
+      POSTGRES_DB: momoguard
+    volumes:
+      - momoguard_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U momoguard"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  web:
+    build: .
+    environment:
+      MOMOGUARD_DB: postgresql+psycopg2://momoguard:momoguard@db:5432/momoguard
+    ports:
+      - "5000:5000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  momoguard_pgdata:

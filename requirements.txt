@@ -1,0 +1,10 @@
+Flask>=3.0
+Flask-SocketIO>=5.3
+SQLAlchemy>=2.0
+PyMySQL>=1.1
+psycopg2-binary>=2.9
+firebase-admin>=6.5
+requests>=2.31
+pyperclip>=1.8
+watchdog>=4.0
+pytest>=8.0

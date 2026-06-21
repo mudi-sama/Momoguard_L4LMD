@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}MoMoGuard — consentements{% endblock %}
+{% block page_title %}Consentements{% endblock %}
+{% block page_sub %}Journal de traçabilité{% endblock %}
+
+{% block content %}
+  <main class="form-wrap">
+    <div class="actions" style="margin-bottom:16px;">
+      <a href="{{ url_for('consent') }}" class="btn-link">+ Nouveau consentement</a>
+    </div>
+    {% if not consents %}
+      <p class="empty">Aucun consentement enregistré pour l'instant.</p>
+    {% else %}
+      <ul class="feed">
+        {% for c in consents %}
+        <li class="report {{ 'eleve' if c.revoked_at else 'faible' }}">
+          <div class="report-top">
+            <div class="report-meta">
+              <span class="tag">{{ c.role or '—' }}</span>
+              <strong>{{ c.participant }}</strong>
+              {% if c.device %}<span>· {{ c.device }}</span>{% endif %}
+              <span>· {{ c.agreed_at }}</span>
+            </div>
+            {% if c.revoked_at %}
+              <span class="badge eleve">Révoqué</span>
+            {% else %}
+              <span class="badge faible">Actif</span>
+            {% endif %}
+          </div>
+          <div class="scopes-line">
+            Autorisé : {{ c.scope | join(', ') if c.scope else 'aucun périmètre' }}
+          </div>
+          {% if not c.revoked_at %}
+          <form method="POST" action="{{ url_for('consent_revoke', cid=c.id) }}" class="inline-form">
+            <button type="submit" class="btn-ghost">Révoquer</button>
+          </form>
+          {% else %}
+          <div class="scopes-line muted">Révoqué le {{ c.revoked_at }}</div>
+          {% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+  </main>
+{% endblock %}

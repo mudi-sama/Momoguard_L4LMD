@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+env/
+
+# Bases de données locales
+*.db
+*.sqlite
+*.sqlite3
+
+# Sauvegardes
+backups/
+
+# Secrets — NE JAMAIS committer
+serviceAccountKey.json
+.env
+
+# Android
+android_agent/google-services.json
+
+# Divers
+*.log
+.DS_Store

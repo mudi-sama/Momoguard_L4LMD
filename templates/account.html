@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}MoMoGuard — compte{% endblock %}
+{% block page_title %}Compte{% endblock %}
+{% block page_sub %}Administrateur{% endblock %}
+
+{% block content %}
+  <main class="form-wrap">
+    <div class="card">
+      <h2>Changer le mot de passe</h2>
+      <p class="lead">Connecté en tant que <strong>{{ username }}</strong>.</p>
+      {% if ok %}<p class="success">Mot de passe mis à jour.</p>{% endif %}
+      {% if erreur %}<p class="alert">{{ erreur }}</p>{% endif %}
+      <form method="POST" action="{{ url_for('account') }}">
+        <label>Mot de passe actuel
+          <input type="password" name="actuel" autocomplete="current-password" required>
+        </label>
+        <label>Nouveau mot de passe
+          <input type="password" name="nouveau" autocomplete="new-password" required>
+        </label>
+        <button type="submit">Mettre à jour</button>
+      </form>
+    </div>
+  </main>
+{% endblock %}

@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}MoMoGuard — paramètres{% endblock %}
+{% block page_title %}Paramètres{% endblock %}
+{% block page_sub %}Moteur de détection{% endblock %}
+
+{% block content %}
+  <main class="form-wrap">
+    <div class="card">
+      <h2>Seuils de score</h2>
+      <p class="lead">
+        Le score d'un évènement (0–100) détermine son niveau. Ajuste les bornes :
+        en dessous du seuil « moyen » c'est faible, entre les deux c'est moyen,
+        au-dessus du seuil « élevé » c'est élevé.
+      </p>
+      {% if ok %}<p class="success">Seuils mis à jour.</p>{% endif %}
+      {% if erreur %}<p class="alert">{{ erreur }}</p>{% endif %}
+      <form method="POST" action="{{ url_for('settings_page') }}">
+        <label>Seuil « moyen » (orange)
+          <input type="number" name="seuil_moyen" min="0" max="100" value="{{ moyen }}">
+        </label>
+        <label>Seuil « élevé » (rouge)
+          <input type="number" name="seuil_eleve" min="0" max="100" value="{{ eleve }}">
+        </label>
+        <button type="submit">Enregistrer</button>
+      </form>
+    </div>
+  </main>
+{% endblock %}
