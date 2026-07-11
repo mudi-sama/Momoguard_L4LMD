@@ -10,6 +10,34 @@ bord temps réel.
 Projet de fin d'études L4 — axe **sécurité des utilisateurs (humains)** :
 phishing, smishing, ingénierie sociale.
 
+## Structure du projet
+
+```
+momoguard/
+├── run.py                 # Lancer le serveur
+├── requirements.txt
+├── Makefile
+│
+├── server/                # Serveur central (Flask + API + dashboard)
+│   ├── app.py             # Routes, auth admin, WebSocket
+│   ├── database.py        # SQLAlchemy (SQLite / PostgreSQL / MySQL)
+│   ├── scoring.py         # Moteur de détection par règles
+│   ├── threat_intel.py    # Google Safe Browsing (optionnel)
+│   ├── firebase_auth.py   # Auth mobile + notifications push
+│   ├── templates/         # Pages HTML (dashboard, utilisateurs…)
+│   └── static/            # CSS + JavaScript
+│
+├── agents/                # Clients installés sur les appareils
+│   └── windows_agent.py   # Agent Windows (presse-papier, téléchargements)
+│
+├── scripts/               # Utilitaires
+│   ├── seed_demo.py       # Données de démonstration
+│   └── backup_db.py       # Sauvegarde JSON
+│
+├── tests/                 # Suite pytest
+└── evaluation/            # Benchmark du moteur (métriques, dataset)
+```
+
 ## Architecture
 
 ```
@@ -20,26 +48,13 @@ Agent Android (Kotlin) ─┘                      │
    • notifications FCM ←──────────────────────┘
 ```
 
-## Composants
-
-| Élément              | Rôle                                                       |
-|----------------------|------------------------------------------------------------|
-| `app.py`             | Serveur Flask + SocketIO (API + dashboard + backoffice)    |
-| `database.py`        | Couche données SQLAlchemy (portable, une seule URL)        |
-| `scoring.py`         | Moteur de scoring par règles, explicable                   |
-| `firebase_auth.py`   | Vérification des jetons Firebase + envoi des push          |
-| `templates/`, `static/` | Interface (dashboard, gestion, paramètres)              |
-| `agents/`            | Agent Windows (Python)                                      |
-| `tests/`             | Suite de tests `pytest`                                     |
-| `scripts/`           | Automatisation (seed de démo, sauvegarde)                  |
-
 ## Installation (local)
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate      # Windows : .venv\Scripts\activate
 pip install -r requirements.txt
-python app.py
+python run.py
 ```
 
 Dashboard : http://127.0.0.1:5000 — compte par défaut `admin` / `momoguard`
@@ -50,7 +65,7 @@ Dashboard : http://127.0.0.1:5000 — compte par défaut `admin` / `momoguard`
 Le moteur se choisit via la variable d'environnement `MOMOGUARD_DB` :
 
 ```bash
-# SQLite (défaut, développement)
+# SQLite (défaut, développement — fichier momoguard.db à la racine)
 export MOMOGUARD_DB="sqlite:///momoguard.db"
 
 # PostgreSQL (recommandé en production)
@@ -62,15 +77,6 @@ export MOMOGUARD_DB="mysql+pymysql://root:@127.0.0.1:3306/momoguard"
 
 Les tables sont créées automatiquement au démarrage ; les colonnes ajoutées au
 fil des versions sont migrées en douceur, sans perte de données.
-
-## Docker (serveur + PostgreSQL)
-
-```bash
-docker compose up --build
-```
-
-Démarre PostgreSQL et le serveur MoMoGuard relié à cette base. Dashboard sur
-http://127.0.0.1:5000.
 
 ## Tests
 
@@ -89,10 +95,23 @@ python scripts/backup_db.py     # sauvegarde toutes les tables en JSON horodaté
 ```
 
 Un `Makefile` regroupe les commandes : `make install`, `make run`, `make test`,
-`make seed`, `make backup`, `make docker-up`, `make docker-down`.
+`make seed`, `make backup`.
 
 ## Firebase
 
 Placer la clé de service `serviceAccountKey.json` à la racine pour activer
 l'authentification client et les notifications push. **Ce fichier ne doit jamais
 être committé** (il est exclu via `.gitignore`).
+
+## Réputation d'URL (API externe, optionnelle)
+
+Le moteur peut consulter **Google Safe Browsing** pour vérifier les liens des
+messages. Active-la en définissant la clé :
+
+```bash
+export SAFEBROWSING_API_KEY="ta_cle_api"
+```
+
+Quand une URL est confirmée malveillante, l'alerte est automatiquement classée
+**élevée**. Sans clé (ou hors ligne), cette vérification est simplement ignorée :
+la détection par règles continue de fonctionner normalement.

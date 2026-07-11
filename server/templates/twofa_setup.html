@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}MoMoGuard — activation 2FA{% endblock %}
+{% block page_title %}Authentification à deux facteurs{% endblock %}
+{% block page_sub %}Sécuriser la connexion administrateur{% endblock %}
+
+{% block content %}
+  <main class="form-wrap">
+    <div class="card">
+      <h2>Activer la 2FA</h2>
+      <p class="lead">Scanne ce QR code avec une application d'authentification (Google Authenticator, Authy…), ou saisis la clé manuellement. Entre ensuite le code à 6 chiffres pour confirmer.</p>
+      {% if erreur %}<p class="alert">{{ erreur }}</p>{% endif %}
+      <div class="qr">{{ qr_svg | safe }}</div>
+      <p class="lead">Clé : <span class="mono">{{ secret }}</span></p>
+      <form method="POST" action="{{ url_for('twofa_enable') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <label>Code de vérification
+          <input type="text" name="code" inputmode="numeric" required autofocus>
+        </label>
+        <button type="submit">Activer la 2FA</button>
+      </form>
+    </div>
+  </main>
+{% endblock %}

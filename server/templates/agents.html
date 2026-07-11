@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}MoMoGuard — agents{% endblock %}
+{% block page_title %}Agents{% endblock %}
+{% block page_sub %}Gestion et connectivité des agents{% endblock %}
+
+{% block content %}
+  <main class="form-wrap wide">
+    <div class="card">
+      <h2>Ajouter un agent</h2>
+      <p class="lead">Déclare un agent et récupère son jeton à coller dans sa configuration. <strong>Seuls les agents déclarés</strong> peuvent envoyer des rapports.</p>
+      {% if new_token %}
+      <p class="success">Agent <strong>{{ new_token.id }}</strong> enregistré. Copiez ce jeton maintenant — il ne sera plus affiché :
+        <code style="word-break:break-all">{{ new_token.token }}</code></p>
+      {% endif %}
+      {% if erreur %}<p class="alert">{{ erreur }}</p>{% endif %}
+      <form method="POST" action="{{ url_for('agents') }}" class="row-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="text" name="agent_id" placeholder="Identifiant (ex : windows-pc-01)" required>
+        <input type="text" name="label" placeholder="Nom lisible (ex : PC du bureau)">
+        <input type="text" name="platform" placeholder="Plateforme (windows / android)">
+        <button type="submit">Enregistrer</button>
+      </form>
+    </div>
+
+    <h2 class="section-title">Agents enregistrés</h2>
+    {% if not agents %}
+      <p class="empty">Aucun agent enregistré pour l'instant.</p>
+    {% else %}
+      <ul class="feed">
+        {% for a in agents %}
+        <li class="report {{ 'eleve' if a.status == 'blocked' else 'faible' }}">
+          <div class="report-top">
+            <div class="report-meta">
+              <span class="tag">{{ a.platform or '—' }}</span>
+              <strong>{{ a.label or a.agent_id }}</strong>
+              <span class="tag">{{ a.agent_id }}</span>
+              <span>· vu : {{ a.last_seen or 'jamais' }}</span>
+              <span class="conn {{ 'on' if a.online else 'off' }}">{{ 'En ligne' if a.online else 'Hors ligne' }}</span>
+            </div>
+            <span class="badge {{ 'eleve' if a.status == 'blocked' else 'faible' }}">
+              {{ 'Bloqué' if a.status == 'blocked' else 'Actif' }}
+            </span>
+          </div>
+          <div class="actions">
+            {% if a.status == 'blocked' %}
+            <form method="POST" action="{{ url_for('agent_unblock', agent_id=a.agent_id) }}" class="inline-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button type="submit" class="btn-ghost ok">Débloquer</button>
+            </form>
+            {% else %}
+            <form method="POST" action="{{ url_for('agent_block', agent_id=a.agent_id) }}" class="inline-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button type="submit" class="btn-ghost">Bloquer</button>
+            </form>
+            {% endif %}
+            <form method="POST" action="{{ url_for('agent_remove', agent_id=a.agent_id) }}" class="inline-form"
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  onsubmit="return confirm('Retirer définitivement cet agent ?');">
+              <button type="submit" class="btn-ghost">Retirer</button>
+            </form>
+          </div>
+        </li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+  </main>
+{% endblock %}

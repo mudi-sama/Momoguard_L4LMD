@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% block title %}MoMoGuard — analyseur{% endblock %}
+
+{% block page_title %}Analyseur{% endblock %}
+{% block page_sub %}Tester un message suspect en direct{% endblock %}
+
+{% block content %}
+  <div class="form-wrap wide">
+    <div class="card">
+      <h2>Analyser un message</h2>
+      <p class="lead">Collez un SMS ou un lien : le moteur affiche immédiatement le score,
+        les règles déclenchées et un conseil de prévention. Rien n'est enregistré.</p>
+
+      <label>Type d'évènement
+        <select id="an-type">
+          <option value="sms">SMS / message</option>
+          <option value="link">Lien</option>
+          <option value="clipboard">Presse-papier</option>
+          <option value="file">Fichier</option>
+          <option value="ussd">Code USSD</option>
+        </select>
+      </label>
+
+      <label>Message à analyser
+        <textarea id="an-content" rows="4"
+          placeholder="Ex : URGENT votre compte Orange Money sera suspendu, reactivez sur http://0range-money.tk"></textarea>
+      </label>
+
+      <div class="actions">
+        <button type="button" id="an-run">Analyser</button>
+        <button type="button" id="an-sample" class="btn-link">Exemple aléatoire</button>
+      </div>
+
+      <div id="an-result" class="an-result" hidden></div>
+    </div>
+  </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  var typeEl = document.getElementById("an-type");
+  var contentEl = document.getElementById("an-content");
+  var runBtn = document.getElementById("an-run");
+  var sampleBtn = document.getElementById("an-sample");
+  var resultEl = document.getElementById("an-result");
+  var LEVEL = { faible: "Faible", moyen: "Moyen", eleve: "Élevé" };
+  var SAMPLES = [
+    "URGENT: votre compte Orange Money sera suspendu. Reactivez sur http://0range-money.tk",
+    "M-Pesa: votre carte SIM va etre remplacee. Communiquez votre code PUK pour confirmer.",
+    "Felicitations ! Vous avez gagne 5.000.000 FC, envoyez 50$ de frais pour recevoir.",
+    "Bonjour, je suis agent Airtel Money. Donnez le code de validation recu pour securiser votre compte.",
+    "Rendez-vous demain a 14h a l'agence pour votre dossier. Merci."
+  ];
+
+  function esc(s) {
+    return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+
+  function render(d) {
+    if (d.error) {
+      resultEl.hidden = false;
+      resultEl.innerHTML = '<p class="alert">' + esc(d.error) + "</p>";
+      return;
+    }
+    var reasons = (d.reasons || []).map(function (x) { return "<li>" + esc(x) + "</li>"; }).join("");
+    resultEl.hidden = false;
+    resultEl.innerHTML =
+      '<div class="an-head">' +
+        '<span class="badge ' + d.level + '">' + (LEVEL[d.level] || d.level) + " · " + d.score + "/100</span>" +
+        (d.categorie ? '<span class="tag">' + esc(d.categorie) + "</span>" : "") +
+      "</div>" +
+      '<div class="bar-track an-scorebar"><div class="bar-fill ' + d.level + '" style="width:' + d.score + '%"></div></div>' +
+      "<ul class=\"reasons\">" + reasons + "</ul>" +
+      (d.conseil ? '<div class="report-conseil"><strong>Conseil :</strong> ' + esc(d.conseil) + "</div>" : "");
+  }
+
+  function analyze() {
+    var content = contentEl.value.trim();
+    if (!content) { contentEl.focus(); return; }
+    var token = (document.querySelector('meta[name="csrf-token"]') || {}).content || "";
+    runBtn.disabled = true;
+    fetch("/api/analyze", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-CSRFToken": token },
+      body: JSON.stringify({ content: content, event_type: typeEl.value })
+    })
+      .then(function (r) { return r.json(); })
+      .then(render)
+      .catch(function () {
+        resultEl.hidden = false;
+        resultEl.innerHTML = '<p class="alert">Erreur réseau lors de l\'analyse.</p>';
+      })
+      .finally(function () { runBtn.disabled = false; });
+  }
+
+  runBtn.addEventListener("click", analyze);
+  sampleBtn.addEventListener("click", function () {
+    contentEl.value = SAMPLES[Math.floor(Math.random() * SAMPLES.length)];
+    typeEl.value = "sms";
+    analyze();
+  });
+  contentEl.addEventListener("keydown", function (e) {
+    if ((e.ctrlKey || e.metaKey) && e.key === "Enter") analyze();
+  });
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MoMoGuard — vérification 2FA</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <script>(function(){try{var t=localStorage.getItem('momoguard-theme')||'light';if(t==='dark')document.documentElement.classList.add('dark');}catch(e){}})();</script>
+</head>
+<body>
+  <main class="auth">
+    <div class="auth-card">
+
+      <aside class="auth-visual">
+        <div class="visual-grid"></div>
+
+        <div class="visual-brand">
+          <span class="vmark">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          </span>
+          <span>MoMoGuard</span>
+        </div>
+
+        <div class="visual-center">
+          <svg class="visual-shield" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+            <defs>
+              <linearGradient id="shieldg2" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0" stop-color="#ffffff"/>
+                <stop offset="1" stop-color="#b9c2ff"/>
+              </linearGradient>
+            </defs>
+            <path d="M60 12 L100 26 V58 C100 84 82 100 60 108 C38 100 20 84 20 58 V26 Z"
+                  fill="url(#shieldg2)" opacity="0.14"/>
+            <path d="M60 12 L100 26 V58 C100 84 82 100 60 108 C38 100 20 84 20 58 V26 Z"
+                  stroke="url(#shieldg2)" stroke-width="2.5" fill="none"/>
+            <rect x="46" y="56" width="28" height="22" rx="4" stroke="#ffffff" stroke-width="4" fill="none"/>
+            <path d="M51 56 v-6 a9 9 0 0 1 18 0 v6" stroke="#ffffff" stroke-width="4" fill="none" stroke-linecap="round"/>
+          </svg>
+          <h2 class="visual-welcome">Sécurité</h2>
+        </div>
+
+        <p class="visual-foot">
+          <strong>Double authentification</strong><br>
+          Saisis le code à 6 chiffres de ton application d'authentification.
+        </p>
+      </aside>
+
+      <section class="auth-form">
+        <h1>Vérification</h1>
+        <p class="auth-sub">Entre ton code à usage unique</p>
+
+        {% if erreur %}<p class="alert">{{ erreur }}</p>{% endif %}
+
+        <form method="POST" action="{{ url_for('login_2fa') }}" id="otp-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="code" id="otp-code">
+
+          <div class="otp-group" id="otp-group">
+            <input class="otp-cell" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="1" aria-label="Chiffre 1" autofocus>
+            <input class="otp-cell" type="text" inputmode="numeric" maxlength="1" aria-label="Chiffre 2">
+            <input class="otp-cell" type="text" inputmode="numeric" maxlength="1" aria-label="Chiffre 3">
+            <span class="otp-dash"></span>
+            <input class="otp-cell" type="text" inputmode="numeric" maxlength="1" aria-label="Chiffre 4">
+            <input class="otp-cell" type="text" inputmode="numeric" maxlength="1" aria-label="Chiffre 5">
+            <input class="otp-cell" type="text" inputmode="numeric" maxlength="1" aria-label="Chiffre 6">
+          </div>
+
+          <button type="submit">Valider</button>
+        </form>
+
+        <p class="auth-foot"><a href="{{ url_for('login') }}">Retour à la connexion</a></p>
+      </section>
+
+    </div>
+  </main>
+
+  <script>
+  (function () {
+    var group = document.getElementById("otp-group");
+    var cells = Array.prototype.slice.call(group.querySelectorAll(".otp-cell"));
+    var hidden = document.getElementById("otp-code");
+    var form = document.getElementById("otp-form");
+
+    function sync() {
+      hidden.value = cells.map(function (c) { return c.value; }).join("");
+    }
+    function onlyDigit(v) { return (v || "").replace(/\D/g, ""); }
+
+    cells.forEach(function (cell, i) {
+      cell.addEventListener("input", function () {
+        cell.value = onlyDigit(cell.value).slice(-1);
+        cell.classList.toggle("filled", cell.value !== "");
+        if (cell.value && i < cells.length - 1) cells[i + 1].focus();
+        sync();
+      });
+      cell.addEventListener("keydown", function (e) {
+        if (e.key === "Backspace" && !cell.value && i > 0) {
+          cells[i - 1].focus();
+          cells[i - 1].value = "";
+          cells[i - 1].classList.remove("filled");
+          sync();
+        }
+        if (e.key === "ArrowLeft" && i > 0) cells[i - 1].focus();
+        if (e.key === "ArrowRight" && i < cells.length - 1) cells[i + 1].focus();
+      });
+      cell.addEventListener("paste", function (e) {
+        e.preventDefault();
+        var data = onlyDigit((e.clipboardData || window.clipboardData).getData("text")).slice(0, cells.length);
+        for (var j = 0; j < data.length && (i + j) < cells.length; j++) {
+          cells[i + j].value = data[j];
+          cells[i + j].classList.add("filled");
+        }
+        var next = Math.min(i + data.length, cells.length - 1);
+        cells[next].focus();
+        sync();
+      });
+    });
+
+    form.addEventListener("submit", sync);
+  })();
+  </script>
+</body>
+</html>

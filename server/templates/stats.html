@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}MoMoGuard — statistiques{% endblock %}
+
+{% block page_title %}Statistiques{% endblock %}
+{% block page_sub %}Performance du moteur et activité{% endblock %}
+
+{% block content %}
+  <div class="toolbar">
+    <a href="{{ url_for('export_reports_csv') }}" class="btn-link">Exporter les alertes (CSV)</a>
+  </div>
+
+  <section class="chart-card">
+    <h3 class="chart-title">Performance du moteur (benchmark hors ligne)</h3>
+    <p class="lead">Évaluation sur {{ evaluation.dataset }} messages étiquetés
+      ({{ evaluation.fraude }} frauduleux, {{ evaluation.legitime }} légitimes).</p>
+    <div class="kpi-grid">
+      <div class="kpi"><span class="kpi-num">{{ evaluation.rappel }}%</span><span class="kpi-label">Taux de détection</span></div>
+      <div class="kpi"><span class="kpi-num">{{ evaluation.precision }}%</span><span class="kpi-label">Précision</span></div>
+      <div class="kpi"><span class="kpi-num">{{ evaluation.faux_positifs }}%</span><span class="kpi-label">Faux positifs</span></div>
+      <div class="kpi"><span class="kpi-num">{{ evaluation.f1 }}%</span><span class="kpi-label">F1-score</span></div>
+      <div class="kpi"><span class="kpi-num">{{ evaluation.exactitude }}%</span><span class="kpi-label">Exactitude</span></div>
+    </div>
+  </section>
+
+  <section class="stats">
+    <div class="stat-card">
+      <span class="stat-icon brand"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></span>
+      <div><span class="stat-num">{{ stats.total }}</span><span class="stat-label">Évènements</span></div>
+    </div>
+    <div class="stat-card">
+      <span class="stat-icon faible"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg></span>
+      <div><span class="stat-num">{{ stats.faible }}</span><span class="stat-label">Faible</span></div>
+    </div>
+    <div class="stat-card">
+      <span class="stat-icon moyen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg></span>
+      <div><span class="stat-num">{{ stats.moyen }}</span><span class="stat-label">Moyen</span></div>
+    </div>
+    <div class="stat-card">
+      <span class="stat-icon eleve"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4M12 17h.01"/></svg></span>
+      <div><span class="stat-num">{{ stats.eleve }}</span><span class="stat-label">Élevé</span></div>
+    </div>
+  </section>
+
+  <section class="chart-card">
+    <h3 class="chart-title">Répartition par type d'arnaque</h3>
+    {% if categories %}
+      <table class="log-table">
+        <thead><tr><th>Type d'arnaque</th><th>Alertes</th></tr></thead>
+        <tbody>
+          {% for cat, n in categories.items() %}
+          <tr><td>{{ cat }}</td><td>{{ n }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="empty">Aucune arnaque détectée pour l'instant.</p>
+    {% endif %}
+  </section>
+{% endblock %}

@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}MoMoGuard — journal d'audit{% endblock %}
+{% block page_title %}Journal d'audit{% endblock %}
+{% block page_sub %}Traçabilité des actions administrateur (non-répudiation){% endblock %}
+
+{% block content %}
+  <main class="form-wrap wide">
+    {% if not entries %}
+      <p class="empty">Aucune action enregistrée pour l'instant.</p>
+    {% else %}
+      <div class="card" style="padding:0; overflow:auto;">
+        <table class="log-table">
+          <thead>
+            <tr><th>Date</th><th>Administrateur</th><th>Action</th><th>Cible</th><th>Détails</th></tr>
+          </thead>
+          <tbody>
+            {% for e in entries %}
+            <tr>
+              <td class="mono">{{ e.created_at }}</td>
+              <td>{{ e.actor }}</td>
+              <td>{{ e.action }}</td>
+              <td class="mono">{{ e.target or '—' }}</td>
+              <td>{{ e.details or '—' }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endif %}
+  </main>
+{% endblock %}

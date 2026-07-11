@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}MoMoGuard — menaces{% endblock %}
+
+{% block page_title %}Menaces{% endblock %}
+{% block page_sub %}Réputation d'URL et domaines suspects{% endblock %}
+
+{% block content %}
+  <section class="chart-card">
+    <h3 class="chart-title">Service de réputation d'URL (Google Safe Browsing)</h3>
+    {% if ti_ready %}
+      <p class="scopes-line"><span class="conn on">Actif</span>
+        Les liens des messages sont vérifiés auprès de Google Safe Browsing ;
+        une URL confirmée malveillante force le niveau <strong>élevé</strong>.</p>
+    {% else %}
+      <p class="scopes-line muted"><span class="conn off">Inactif</span>
+        Aucune clé <code>SAFEBROWSING_API_KEY</code> configurée. La détection par règles
+        continue de fonctionner normalement (dégradation gracieuse, 100 % hors ligne).</p>
+    {% endif %}
+  </section>
+
+  <section class="chart-card">
+    <h3 class="chart-title">Domaines suspects repérés dans les alertes</h3>
+    {% if domaines %}
+      <table class="log-table">
+        <thead><tr><th>Domaine</th><th>Niveau</th><th>Date</th><th>Extrait</th></tr></thead>
+        <tbody>
+          {% for d in domaines %}
+          <tr>
+            <td class="mono">{{ d.domaine }}</td>
+            <td><span class="badge {{ d.niveau }}">{{ d.niveau|capitalize }}</span></td>
+            <td>{{ d.date }}</td>
+            <td>{{ d.extrait }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="empty">Aucun domaine suspect dans les alertes récentes.</p>
+    {% endif %}
+  </section>
+{% endblock %}

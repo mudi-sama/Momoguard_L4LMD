@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MoMoGuard — formulaire de consentement</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="dot"></span>
+      <div>
+        <h1>MoMoGuard</h1>
+        <p>Consentement à la surveillance de l'environnement</p>
+      </div>
+    </div>
+    <nav class="nav">
+      <a href="{{ url_for('dashboard') }}">Dashboard</a>
+      <a href="{{ url_for('consents') }}">Consentements</a>
+    </nav>
+  </header>
+
+  <main class="form-wrap">
+    <div class="card">
+      <h2>Avant de commencer</h2>
+      <p class="lead">
+        Cette plateforme observe l'appareil indiqué ci-dessous afin de repérer
+        des tentatives de fraude Mobile Money. La surveillance ne démarre
+        qu'avec ton accord, ne quitte pas l'environnement local, et tu peux la
+        révoquer à tout moment depuis la page « Consentements ».
+      </p>
+
+      {% if erreur %}<p class="alert">{{ erreur }}</p>{% endif %}
+
+      <form method="POST" action="{{ url_for('consent') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <label>Nom du participant
+          <input type="text" name="participant" placeholder="Ex : Peter M." required>
+        </label>
+
+        <label>Rôle dans la session
+          <select name="role">
+            <option value="victime">Victime (cible du test)</option>
+            <option value="attaquant">Attaquant (collègue)</option>
+            <option value="observateur">Observateur / opérateur</option>
+          </select>
+        </label>
+
+        <label>Appareil concerné
+          <input type="text" name="device" placeholder="Ex : Téléphone Android personnel">
+        </label>
+
+        <fieldset>
+          <legend>Périmètre que tu autorises</legend>
+          {% for value, libelle in scopes %}
+          <label class="check">
+            <input type="checkbox" name="scope" value="{{ value }}">
+            <span>{{ libelle }}</span>
+          </label>
+          {% endfor %}
+        </fieldset>
+
+        <label class="check confirm">
+          <input type="checkbox" name="comprend" value="oui">
+          <span>J'ai compris ce qui est surveillé et je donne mon accord.</span>
+        </label>
+
+        <button type="submit">Enregistrer le consentement</button>
+      </form>
+    </div>
+  </main>
+</body>
+</html>

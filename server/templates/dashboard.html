@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}MoMoGuard — supervision{% endblock %}
+
+{% block topbar_status %}
+  <div class="status" id="conn-status">
+    <span class="status-dot"></span><span id="conn-label">connexion…</span>
+  </div>
+{% endblock %}
+
+{% block banner %}
+  {% if mdp_par_defaut %}
+  <div class="warn-banner">
+    Tu utilises encore le mot de passe par défaut. Change-le depuis la page
+    <a href="{{ url_for('account') }}">Compte</a>.
+  </div>
+  {% endif %}
+{% endblock %}
+
+{% block page_title %}Supervision{% endblock %}
+{% block page_sub %}Flux des alertes en temps réel{% endblock %}
+
+{% block content %}
+  <div class="toolbar">
+    <button type="button" id="btn-demo" class="btn-demo">
+      <svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16"><path d="M8 5v14l11-7z"/></svg>
+      Simuler une alerte (démo)
+    </button>
+  </div>
+
+  <section class="stats">
+    <div class="stat-card">
+      <span class="stat-icon brand"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></span>
+      <div><span class="stat-num" id="stat-total">0</span><span class="stat-label">Évènements</span></div>
+    </div>
+    <div class="stat-card lvl-faible">
+      <span class="stat-icon faible"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg></span>
+      <div><span class="stat-num" id="stat-faible">0</span><span class="stat-label">Faible</span></div>
+    </div>
+    <div class="stat-card lvl-moyen">
+      <span class="stat-icon moyen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg></span>
+      <div><span class="stat-num" id="stat-moyen">0</span><span class="stat-label">Moyen</span></div>
+    </div>
+    <div class="stat-card lvl-eleve">
+      <span class="stat-icon eleve"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4M12 17h.01"/></svg></span>
+      <div><span class="stat-num" id="stat-eleve">0</span><span class="stat-label">Élevé</span></div>
+    </div>
+  </section>
+
+
+  <section class="chart-card">
+    <h3 class="chart-title">Répartition par type d'arnaque</h3>
+    <div class="donut-wrap">
+      <svg class="donut" id="donut" viewBox="0 0 42 42" width="156" height="156" role="img" aria-label="Répartition des alertes par type d'arnaque"></svg>
+      <div class="donut-legend" id="donut-legend"></div>
+    </div>
+    <p class="donut-empty" id="donut-empty">Aucune arnaque détectée pour l'instant.</p>
+  </section>
+
+  <main>
+    <div class="filters">
+      <select id="filter-level">
+        <option value="">Tous les niveaux</option>
+        <option value="eleve">Élevé</option>
+        <option value="moyen">Moyen</option>
+        <option value="faible">Faible</option>
+      </select>
+      <select id="filter-platform">
+        <option value="">Toutes plateformes</option>
+        <option value="android">Android</option>
+        <option value="windows">Windows</option>
+      </select>
+      <input id="filter-agent" type="text" placeholder="Filtrer par agent…">
+      <input id="filter-search" type="text" placeholder="Rechercher dans les alertes…">
+    </div>
+
+    <ul class="feed" id="feed">
+      <li class="empty" id="empty-state">En attente d'évènements des agents…</li>
+    </ul>
+  </main>
+{% endblock %}
+
+{% block scripts %}
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
+  <script src="{{ url_for('static', filename='dashboard.js') }}"></script>
+{% endblock %}

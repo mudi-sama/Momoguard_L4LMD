@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MoMoGuard — connexion</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <script>(function(){try{var t=localStorage.getItem('momoguard-theme')||'light';if(t==='dark')document.documentElement.classList.add('dark');}catch(e){}})();</script>
+</head>
+<body>
+  <main class="auth">
+    <div class="auth-card">
+
+      <aside class="auth-visual">
+        <div class="visual-grid"></div>
+
+        <div class="visual-brand">
+          <span class="vmark">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          </span>
+          <span>MoMoGuard</span>
+        </div>
+
+        <div class="visual-center">
+          <svg class="visual-shield" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+            <defs>
+              <linearGradient id="shieldg" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0" stop-color="#ffffff"/>
+                <stop offset="1" stop-color="#b9c2ff"/>
+              </linearGradient>
+            </defs>
+            <path d="M60 12 L100 26 V58 C100 84 82 100 60 108 C38 100 20 84 20 58 V26 Z"
+                  fill="url(#shieldg)" opacity="0.14"/>
+            <path d="M60 12 L100 26 V58 C100 84 82 100 60 108 C38 100 20 84 20 58 V26 Z"
+                  stroke="url(#shieldg)" stroke-width="2.5" fill="none"/>
+            <path d="M44 60 l11 11 l22 -24" stroke="#ffffff" stroke-width="5"
+                  stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+          </svg>
+          <h2 class="visual-welcome">Bienvenue</h2>
+        </div>
+
+        <p class="visual-foot">
+          <strong>Console de supervision</strong><br>
+          Détection de fraude Mobile Money — Orange, Airtel, Vodacom, Africell.
+        </p>
+      </aside>
+
+      <section class="auth-form">
+        <h1>Connexion</h1>
+        <p class="auth-sub">Espace administrateur sécurisé</p>
+
+        {% if erreur %}<p class="alert">{{ erreur }}</p>{% endif %}
+
+        <form method="POST" action="{{ url_for('login') }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <label>Identifiant
+            <input type="text" name="username" autocomplete="username" placeholder="admin" required autofocus>
+          </label>
+          <label>Mot de passe
+            <input type="password" name="password" autocomplete="current-password" placeholder="••••••••" required>
+          </label>
+          <button type="submit">Se connecter</button>
+        </form>
+
+        <p class="auth-foot">Accès réservé au personnel autorisé de MoMoGuard.</p>
+      </section>
+
+    </div>
+  </main>
+</body>
+</html>

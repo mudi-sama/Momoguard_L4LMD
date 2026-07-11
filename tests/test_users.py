@@ -25,7 +25,7 @@ def test_changement_mot_de_passe_notifie(admin):
     admin.fb.update_user_password = lambda uid, pwd: True
     envoyes = []
     admin.fb.send_push = lambda tok, t, b: envoyes.append(tok) or True
-    r = admin.client.post("/users/u1/password", data={"new_password": "secret123"})
+    r = admin.client.post("/users/u1/password", data={"new_password": "secret12345"})
     assert r.status_code == 200 and envoyes == ["TOK"]
 
 

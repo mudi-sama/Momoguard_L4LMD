@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}MoMoGuard — compte{% endblock %}
+{% block page_title %}Compte{% endblock %}
+{% block page_sub %}Administrateur{% endblock %}
+
+{% block content %}
+  <main class="form-wrap">
+    <div class="card">
+      <h2>Changer le mot de passe</h2>
+      <p class="lead">Connecté en tant que <strong>{{ username }}</strong>.</p>
+      {% if ok %}<p class="success">Mot de passe mis à jour.</p>{% endif %}
+      {% if erreur %}<p class="alert">{{ erreur }}</p>{% endif %}
+      <form method="POST" action="{{ url_for('account') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <label>Mot de passe actuel
+          <input type="password" name="actuel" autocomplete="current-password" required>
+        </label>
+        <label>Nouveau mot de passe
+          <input type="password" name="nouveau" autocomplete="new-password" required>
+        </label>
+        <button type="submit">Mettre à jour</button>
+      </form>
+    </div>
+
+    <div class="card" style="margin-top:16px;">
+      <h2>Authentification à deux facteurs (2FA)</h2>
+      {% if twofa_active %}
+        <p class="lead">La 2FA est <strong style="color:var(--faible)">activée</strong>. Un code temporaire est demandé à chaque connexion.</p>
+        <form method="POST" action="{{ url_for('twofa_disable') }}"
+              onsubmit="return confirm('Désactiver la double authentification ?');">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <label>Mot de passe actuel
+            <input type="password" name="password" autocomplete="current-password" required>
+          </label>
+          <label>Code 2FA actuel
+            <input type="text" name="code" inputmode="numeric" autocomplete="one-time-code" required>
+          </label>
+          <button type="submit" class="btn-ghost">Désactiver la 2FA</button>
+        </form>
+      {% else %}
+        <p class="lead">La 2FA n'est pas activée. Renforce la connexion avec un code temporaire (Google Authenticator, etc.) — cohérent avec un projet qui détecte le vol de codes.</p>
+        <a href="{{ url_for('twofa_setup') }}" class="btn-link">Activer la 2FA</a>
+      {% endif %}
+    </div>
+  </main>
+{% endblock %}
