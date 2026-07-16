@@ -1,0 +1,14 @@
+# Déploiement MoMoGuard sur Dokploy (Compose).
+# Les variables viennent de l'onglet Environment de Dokploy (.env généré).
+services:
+  momoguard:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "5000:5000"
+    volumes:
+      # Monte la clé Firebase (crée le fichier sur le VPS ou via un volume Dokploy).
+      - ./serviceAccountKey.json:/app/serviceAccountKey.json:ro
+    # Si tu ajoutes une base Postgres Dokploy, pointe MOMOGUARD_DB vers elle.
