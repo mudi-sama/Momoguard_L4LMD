@@ -59,7 +59,10 @@ app.config.update(
     SESSION_COOKIE_SAMESITE="Lax",  # Limite l'envoi du cookie cross-site
     SESSION_COOKIE_SECURE=_HTTPS,  # Cookie transmis uniquement en HTTPS si activé
     PREFERRED_URL_SCHEME="https" if _HTTPS else "http",  # URLs générées en https derrière Traefik
-    PERMANENT_SESSION_LIFETIME=timedelta(hours=8),  # Expiration session admin
+    # Session « navigateur » : le cookie disparaît à la fermeture du navigateur
+    # (pas de Max-Age). Sans ça, l'admin restait connecté 8 h sans re-login / 2FA.
+    PERMANENT_SESSION_LIFETIME=timedelta(hours=8),  # Utilisé seulement si session.permanent=True
+    SESSION_REFRESH_EACH_REQUEST=True,
     # Derrière Traefik : ne pas exiger le header Referer (certains navigateurs /
     # politiques le retirent). Le jeton CSRF du formulaire reste obligatoire.
     WTF_CSRF_SSL_STRICT=False,
@@ -182,7 +185,7 @@ def login():  # Authentification administrateur
                 session["pending_2fa"] = username  # Session intermédiaire avant code TOTP
                 return redirect(url_for("login_2fa"))  # Étape 2 : saisie du code
             session["admin"] = username  # Session admin établie
-            session.permanent = True  # Applique PERMANENT_SESSION_LIFETIME
+            session.permanent = False  # Cookie de session : expire à la fermeture du navigateur
             database.add_audit(username, "Connexion réussie")  # Trace dans le journal
             return redirect(url_for("dashboard"))  # Redirige vers le tableau de bord
         # Échec : on comptabilise l'essai sur le compte visé (s'il existe).
@@ -217,7 +220,7 @@ def login_2fa():  # Vérification du code à 6 chiffres
             database.reset_failed_login(username)  # Succès : réinitialise le compteur d'échecs
             session.pop("pending_2fa", None)  # Nettoie l'état intermédiaire
             session["admin"] = username  # Connexion finalisée
-            session.permanent = True
+            session.permanent = False  # Cookie de session : expire à la fermeture du navigateur
             database.add_audit(username, "Connexion réussie (2FA)")
             return redirect(url_for("dashboard"))
         # Code invalide : comptabilise l'échec sur le même compte.
