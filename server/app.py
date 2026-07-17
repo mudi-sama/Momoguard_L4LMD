@@ -57,6 +57,9 @@ app.config.update(
     SESSION_COOKIE_SECURE=_HTTPS,  # Cookie transmis uniquement en HTTPS si activé
     PREFERRED_URL_SCHEME="https" if _HTTPS else "http",  # URLs générées en https derrière Traefik
     PERMANENT_SESSION_LIFETIME=timedelta(hours=8),  # Expiration session admin
+    # Derrière Traefik : ne pas exiger le header Referer (certains navigateurs /
+    # politiques le retirent). Le jeton CSRF du formulaire reste obligatoire.
+    WTF_CSRF_SSL_STRICT=False,
 )
 
 socketio = SocketIO(app, cors_allowed_origins=_cors_origins.split(","),
@@ -75,7 +78,9 @@ def _entetes_securite(response):  # Ajoute des en-têtes de sécurité
     """Ajoute des en-têtes de sécurité à toutes les réponses."""
     response.headers["X-Content-Type-Options"] = "nosniff"  # Empêche le MIME sniffing
     response.headers["X-Frame-Options"] = "DENY"  # Interdit l'affichage en iframe (clickjacking)
-    response.headers["Referrer-Policy"] = "no-referrer"  # Ne fuit pas l'URL vers des sites tiers
+    # same-origin : le Referer est envoyé pour les formulaires du site (CSRF),
+    # mais pas vers des sites tiers. "no-referrer" cassait le login (400).
+    response.headers["Referrer-Policy"] = "same-origin"
     response.headers["Content-Security-Policy"] = (  # Restreint les ressources chargées par la page
         "default-src 'self'; "  # Par défaut : même origine uniquement
         "script-src 'self' https://cdnjs.cloudflare.com 'unsafe-inline'; "  # JS autorisés
