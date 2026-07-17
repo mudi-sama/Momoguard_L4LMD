@@ -549,17 +549,32 @@ def report():  # Traite un événement suspect remonté par un agent
     if user and user["status"] != "approved":
         return jsonify({"error": _user_status_error(user["status"])}), 403
 
-    # OWASP A01/A04 : agent pré-enregistré avec jeton obligatoire (pas d'auto-enregistrement).
-    agent = database.get_agent(agent_id)
-    if not agent:
-        return jsonify({"error": "Agent non enregistré — déclarez-le depuis le dashboard"}), 403
-    if agent["status"] == "blocked":
-        return jsonify({"error": "Agent bloqué"}), 403
-    if not agent.get("token"):
-        return jsonify({"error": "Agent sans jeton — régénérez-le depuis le dashboard"}), 401
-    if not token or token != agent["token"]:
-        return jsonify({"error": "Jeton d'agent invalide"}), 401
-    database.touch_agent(agent_id)
+    if platform == "android":
+        # Authentification par le COMPTE uniquement (Firebase) : pas de jeton d'agent.
+        # L'identité vient de l'UID Firebase déjà vérifié ; le compte doit exister et être approuvé.
+        if not user:
+            return jsonify({"error": "Compte non reconnu — connectez-vous d'abord"}), 403
+        # L'appareil est rattaché au compte : identifiant dérivé de l'UID (anti-usurpation).
+        agent_id = f"android-{uid}"
+        agent = database.get_agent(agent_id)
+        if agent and agent["status"] == "blocked":
+            return jsonify({"error": "Agent bloqué"}), 403
+        if not agent:  # Auto-enregistrement léger pour l'affichage dans le dashboard (aucune config côté téléphone)
+            libelle = user.get("display_name") or user.get("email") or agent_id
+            database.register_agent(agent_id, f"{libelle} (Android)", "android", token=None)
+        database.touch_agent(agent_id)
+    else:
+        # OWASP A01/A04 : agent pré-enregistré avec jeton obligatoire (pas d'auto-enregistrement).
+        agent = database.get_agent(agent_id)
+        if not agent:
+            return jsonify({"error": "Agent non enregistré — déclarez-le depuis le dashboard"}), 403
+        if agent["status"] == "blocked":
+            return jsonify({"error": "Agent bloqué"}), 403
+        if not agent.get("token"):
+            return jsonify({"error": "Agent sans jeton — régénérez-le depuis le dashboard"}), 401
+        if not token or token != agent["token"]:
+            return jsonify({"error": "Jeton d'agent invalide"}), 401
+        database.touch_agent(agent_id)
 
     score, level, reasons = scoring.score_event(  # Calcul du score par règles
         event_type, content, metadata, database.get_thresholds()
@@ -590,6 +605,8 @@ def report():  # Traite un événement suspect remonté par un agent
     return jsonify({  # Réponse à l'agent avec le verdict
         "ok": True, "id": saved["id"], "score": score,
         "level": level, "reasons": reasons,
+        "categorie": database._categorie(reasons),  # Type d'arnaque déduit (pour la notification agent)
+        "conseil": database._conseil(reasons),  # Conseil de prévention (« en savoir plus »)
     }), 201  # 201 Created
 
 
@@ -758,7 +775,33 @@ def fcm_token():  # Enregistre ou met à jour le jeton FCM pour les notification
 @app.route("/users")  # Page listant les utilisateurs clients Firebase
 @login_required  # Réservé à l'administrateur
 def users():  # Affiche tous les comptes clients enregistrés
-    return render_template("users.html", users=database.get_users())  # Template avec la liste
+    sync_msg = session.pop("users_sync_msg", None)  # Message éventuel après une synchro Firebase
+    return render_template("users.html", users=database.get_users(),  # Template avec la liste
+                           firebase_ready=firebase_auth.is_ready(),  # Bouton de synchro si Firebase actif
+                           sync_msg=sync_msg)  # Résultat de la dernière synchronisation
+
+
+@app.route("/users/sync", methods=["POST"])  # Synchronise les comptes Firebase → base locale
+@login_required  # Admin requis
+def users_sync():  # Importe dans le dashboard les comptes Firebase absents
+    if not firebase_auth.is_ready():  # Firebase non configuré
+        session["users_sync_msg"] = "Firebase non configuré — synchronisation impossible."
+        return redirect(url_for("users"))
+    try:
+        comptes = firebase_auth.list_users()  # Récupère tous les comptes Firebase
+    except Exception as e:  # Erreur d'accès à Firebase
+        session["users_sync_msg"] = f"Échec de la synchronisation : {e}"
+        return redirect(url_for("users"))
+    crees = 0  # Compteur de nouveaux comptes importés
+    for c in comptes:  # Parcourt chaque compte Firebase
+        if database.import_firebase_user(c["uid"], c["email"], c["display_name"]):  # Insère si absent
+            crees += 1  # Incrémente si un compte a été créé
+    _audit("Synchronisation Firebase", details=f"{crees} compte(s) importé(s) sur {len(comptes)}")
+    session["users_sync_msg"] = (
+        f"Synchronisation terminée : {crees} nouveau(x) compte(s) importé(s) "
+        f"sur {len(comptes)} dans Firebase."
+    )
+    return redirect(url_for("users"))
 
 
 @app.route("/users/<uid>/approve", methods=["POST"])  # Route POST pour approuver un compte
@@ -791,7 +834,12 @@ def user_detail(uid):  # Affiche le profil et les actions disponibles
     user = database.get_user_by_uid(uid)  # Récupère l'utilisateur par son UID
     if not user:  # Utilisateur introuvable
         return redirect(url_for("users"))  # Redirige vers la liste
-    return render_template("user_detail.html", user=user, ok=False, msg=None, erreur=None)  # Affiche la fiche
+    agent_id = database.ensure_agent_for_user(uid, user.get("display_name") or user.get("email"))  # Agent attribué
+    agent = database.get_agent(agent_id)  # Fiche de l'agent lié au compte
+    if agent:  # Enrichit avec l'état en ligne/hors ligne
+        agent = _annotate_online([agent])[0]
+    return render_template("user_detail.html", user=user, agent=agent,  # Affiche la fiche + agent attribué
+                           ok=False, msg=None, erreur=None)
 
 
 @app.route("/users/<uid>/edit", methods=["POST"])  # Route POST pour modifier un utilisateur
@@ -918,6 +966,25 @@ def on_connect():  # Callback à la connexion WebSocket
     print("[+] Dashboard connecté (admin authentifié)")
 
 
+def _lan_ips():
+    """Retourne les adresses IPv4 locales (LAN) utilisables par un téléphone."""
+    import socket  # Résolution des adresses réseau de la machine
+    ips = set()  # Ensemble d'adresses uniques
+    try:  # Méthode fiable : ouvre une socket UDP vers l'extérieur pour lire l'IP LAN
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)  # Aucune donnée réellement envoyée
+        s.connect(("8.8.8.8", 80))  # Détermine l'interface de sortie
+        ips.add(s.getsockname()[0])  # IP locale de cette interface
+        s.close()
+    except OSError:
+        pass  # Pas de réseau : on ignore
+    try:  # Complément : toutes les IPv4 associées au nom d'hôte
+        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            ips.add(info[4][0])  # Ajoute chaque adresse trouvée
+    except OSError:
+        pass  # Résolution impossible : on ignore
+    return sorted(ip for ip in ips if not ip.startswith("127."))  # Exclut la boucle locale
+
+
 def main():  # Point d'entrée du serveur MoMoGuard
     """Initialise la base, l'admin et démarre le serveur."""
     database.init_db()  # Crée les tables SQLite si nécessaire
@@ -926,7 +993,11 @@ def main():  # Point d'entrée du serveur MoMoGuard
         print("[Firebase] authentification client activée")  # Firebase opérationnel
     else:  # Clé de service absente ou invalide
         print("[Firebase] clé absente — authentification client désactivée")  # Mode dégradé
-    host = os.environ.get("MOMOGUARD_HOST", "127.0.0.1")
+    # En développement, on écoute sur toutes les interfaces (0.0.0.0) pour que
+    # l'app mobile sur le même Wi-Fi puisse joindre le serveur. En production,
+    # on garde 127.0.0.1 par défaut (à placer derrière un reverse-proxy).
+    _defaut_host = "127.0.0.1" if _PRODUCTION else "0.0.0.0"
+    host = os.environ.get("MOMOGUARD_HOST", _defaut_host)
     port = int(os.environ.get("MOMOGUARD_PORT", "5000"))
     debug = os.environ.get("MOMOGUARD_DEBUG", "0") == "1"
     if _PRODUCTION and debug:
@@ -934,13 +1005,34 @@ def main():  # Point d'entrée du serveur MoMoGuard
         debug = False
     print("=" * 60)
     print(" MoMoGuard - serveur central")
-    print(f" Dashboard : http://{host}:{port}  (connexion requise)")
+    print(f" Dashboard : http://127.0.0.1:{port}  (connexion requise)")
+    if host == "0.0.0.0":  # Serveur accessible depuis le réseau local
+        lan = _lan_ips()  # Détecte les adresses LAN de ce PC
+        if lan:
+            print(" Accès mobile (app Android) — mets une de ces URL dans l'app :")
+            for ip in lan:  # Affiche chaque adresse joignable par le téléphone
+                print(f"   http://{ip}:{port}")
+            print(" (le téléphone doit être sur le MÊME Wi-Fi ; autorise le port "
+                  f"{port} dans le pare-feu Windows)")
+        else:
+            print(" [!] Aucune IP LAN détectée — vérifie ta connexion Wi-Fi.")
+    else:  # Liaison restreinte : le mobile ne pourra pas joindre le serveur
+        print(f" [!] host={host} : l'app mobile ne pourra pas se connecter "
+              "(utilise MOMOGUARD_HOST=0.0.0.0).")
     print(f" API       : POST http://{host}:{port}/report")
     if _HTTPS:
         print(" HTTPS     : SESSION_COOKIE_SECURE activé")
     print("=" * 60)
-    socketio.run(app, host=host, port=port, debug=debug,
-                 allow_unsafe_werkzeug=debug)
+    # Derrière Dokploy/Traefik : un seul process Python est acceptable.
+    # Sans allow_unsafe_werkzeug=True, SocketIO refuse de démarrer en production
+    # → conteneur mort → 502 Bad Gateway.
+    socketio.run(
+        app,
+        host=host,
+        port=port,
+        debug=debug,
+        allow_unsafe_werkzeug=True,
+    )
 
 
 if __name__ == "__main__":  # Exécution directe du module (python -m server.app)
