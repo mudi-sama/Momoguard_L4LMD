@@ -33,6 +33,9 @@ _MAX_REPORT_CONTENT = 65_536  # Limite taille payload /report (anti-DoS)
 _MAX_REPORT_METADATA_KEYS = 50
 _MAX_LOGIN_FAILURES = 4  # Verrouillage du compte après ce nombre d'échecs consécutifs (OWASP A07)
 _LOCKOUT_MINUTES = 15  # Durée du verrouillage temporaire du compte admin
+# Fenêtre TOTP élargie (±60 s) : les VPS / conteneurs ont souvent une horloge
+# légèrement décalée par rapport au téléphone (Google Authenticator).
+_TOTP_WINDOW = 2
 
 _secret = os.environ.get("MOMOGUARD_SECRET")
 if _PRODUCTION and not _secret:
@@ -210,7 +213,7 @@ def login_2fa():  # Vérification du code à 6 chiffres
         code = (request.form.get("code") or "").strip()  # Code saisi par l'utilisateur
         admin = database.get_admin(username)
         secret = admin.get("totp_secret") if admin else None  # Clé secrète TOTP
-        if secret and pyotp.TOTP(secret).verify(code, valid_window=1):  # Code valide (±30s)
+        if secret and pyotp.TOTP(secret).verify(code, valid_window=_TOTP_WINDOW):
             database.reset_failed_login(username)  # Succès : réinitialise le compteur d'échecs
             session.pop("pending_2fa", None)  # Nettoie l'état intermédiaire
             session["admin"] = username  # Connexion finalisée
@@ -218,6 +221,8 @@ def login_2fa():  # Vérification du code à 6 chiffres
             database.add_audit(username, "Connexion réussie (2FA)")
             return redirect(url_for("dashboard"))
         # Code invalide : comptabilise l'échec sur le même compte.
+        print(f"[2FA] échec pour {username} — heure UTC serveur : "
+              f"{datetime.now(timezone.utc).isoformat()} — code reçu len={len(code)}")
         _, locked_until = database.record_failed_login(
             username, _MAX_LOGIN_FAILURES, _LOCKOUT_MINUTES)
         if locked_until:  # Seuil atteint : verrouillage du compte
@@ -226,7 +231,11 @@ def login_2fa():  # Vérification du code à 6 chiffres
                                target=username,
                                details=f"{_MAX_LOGIN_FAILURES} échecs — verrou {_LOCKOUT_MINUTES} min")
             return render_template("login.html", erreur=_message_verrou(_LOCKOUT_MINUTES * 60)), 429
-        return render_template("login_2fa.html", erreur="Code incorrect ou expiré."), 401
+        return render_template(
+            "login_2fa.html",
+            erreur="Code incorrect ou expiré. Vérifie l'heure de ton téléphone "
+                   "et du serveur (NTP), ou réinitialise la 2FA.",
+        ), 401
     return render_template("login_2fa.html", erreur=None)  # GET : formulaire code
 
 
@@ -291,10 +300,11 @@ def twofa_enable():
     code = (request.form.get("code") or "").strip()  # Code de l'app authenticator
     if not secret:
         return redirect(url_for("twofa_setup"))
-    if not pyotp.TOTP(secret).verify(code, valid_window=1):  # Code incorrect
+    if not pyotp.TOTP(secret).verify(code, valid_window=_TOTP_WINDOW):  # Code incorrect
         uri = pyotp.TOTP(secret).provisioning_uri(name=username, issuer_name="MoMoGuard")
         return render_template("twofa_setup.html", secret=secret, qr_svg=_qr_svg(uri),
-                               erreur="Code incorrect, réessaie."), 400
+                               erreur="Code incorrect. Vérifie l'heure automatique (NTP) "
+                                      "sur le téléphone et le serveur."), 400
     database.set_admin_totp(username, secret)  # Enregistre le secret en base
     session.pop("twofa_tmp", None)  # Nettoie la session temporaire
     _audit("Activation de la 2FA")
@@ -314,12 +324,34 @@ def twofa_disable():
     if not check_password_hash(admin["password_hash"], password):
         return render_template("account.html", username=username, twofa_active=True,
                                erreur="Mot de passe incorrect — 2FA non désactivée.", ok=False), 401
-    if not pyotp.TOTP(secret).verify(code, valid_window=1):
+    if not pyotp.TOTP(secret).verify(code, valid_window=_TOTP_WINDOW):
         return render_template("account.html", username=username, twofa_active=True,
                                erreur="Code 2FA incorrect — 2FA non désactivée.", ok=False), 401
     database.set_admin_totp(username, None)  # Supprime le secret TOTP
     _audit("Désactivation de la 2FA")
     return redirect(url_for("account"))
+
+
+def _maybe_reset_admin_2fa():
+    """Réinitialise la 2FA admin si MOMOGUARD_RESET_ADMIN_2FA=1 (secours VPS).
+
+    À utiliser UNE FOIS après un redeploy qui a cassé le secret Authenticator,
+    puis retirer immédiatement la variable et redéployer.
+    """
+    if os.environ.get("MOMOGUARD_RESET_ADMIN_2FA", "").strip() != "1":
+        return
+    cible = os.environ.get("MOMOGUARD_RESET_ADMIN_USER", DEFAULT_ADMIN_USER).strip()
+    admin = database.get_admin(cible)
+    if not admin:
+        print(f"[2FA] reset demandé mais admin inconnu : {cible}")
+        return
+    if not admin.get("totp_secret"):
+        print(f"[2FA] reset demandé — {cible} n'avait déjà pas de 2FA")
+        return
+    database.set_admin_totp(cible, None)
+    database.reset_failed_login(cible)  # Déverrouille aussi le compte
+    print(f"[2FA] RÉINITIALISÉE pour « {cible} » — retire MOMOGUARD_RESET_ADMIN_2FA=1 "
+          "des variables Dokploy puis redeploy.")
 
 
 # --- Santé / diagnostic (Dokploy, monitoring) ------------------------------
@@ -1016,6 +1048,9 @@ def main():  # Point d'entrée du serveur MoMoGuard
     """Initialise la base, l'admin et démarre le serveur."""
     database.init_db()  # Crée les tables SQLite si nécessaire
     ensure_default_admin()  # Crée l'admin par défaut au premier lancement
+    _maybe_reset_admin_2fa()  # Secours optionnel si la 2FA bloque après un redeploy
+    print(f"[Horloge] UTC serveur : {datetime.now(timezone.utc).isoformat()} "
+          "(doit coller à l'heure de ton téléphone ±1 min)")
     if firebase_auth.init_firebase():  # Tente d'initialiser Firebase Admin SDK
         print("[Firebase] authentification client activée")  # Firebase opérationnel
     else:  # Clé de service absente ou invalide
