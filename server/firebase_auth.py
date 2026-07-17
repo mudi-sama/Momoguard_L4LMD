@@ -13,23 +13,63 @@ et le reste de la plateforme continue de fonctionner normalement.
 """
 
 import os  # Accès au système de fichiers pour localiser la clé Firebase
+import json  # Décodage de la clé fournie en variable d'environnement
+import base64  # Décodage de la clé fournie encodée en base64
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # Racine du projet (dossier momoguard/)
 CRED_PATH = os.path.join(ROOT, "serviceAccountKey.json")  # Chemin complet vers la clé de service
 _initialized = False  # Indique si le SDK Firebase a déjà été initialisé
 
 
+def _charger_credentials_env():
+    """Charge la clé de service depuis une variable d'environnement.
+
+    Utile en production (Dokploy / Docker) où l'on ne veut PAS committer le
+    fichier serviceAccountKey.json. Deux formats acceptés :
+      - FIREBASE_CREDENTIALS_JSON    : le JSON brut de la clé ;
+      - FIREBASE_CREDENTIALS_BASE64  : ce même JSON encodé en base64 (recommandé,
+        car il n'y a aucun problème de sauts de ligne dans la clé privée).
+    Renvoie un dict exploitable par firebase-admin, ou None si rien n'est fourni.
+    """
+    raw = os.environ.get("FIREBASE_CREDENTIALS_JSON", "").strip()  # 1) JSON brut
+    if raw:
+        try:
+            return json.loads(raw)  # Convertit la chaîne JSON en dictionnaire
+        except json.JSONDecodeError as e:
+            print(f"[Firebase] FIREBASE_CREDENTIALS_JSON invalide : {e}")  # Non bloquant
+
+    b64 = os.environ.get("FIREBASE_CREDENTIALS_BASE64", "").strip()  # 2) JSON en base64
+    if b64:
+        try:
+            return json.loads(base64.b64decode(b64).decode("utf-8"))  # Décode puis parse
+        except Exception as e:
+            print(f"[Firebase] FIREBASE_CREDENTIALS_BASE64 invalide : {e}")  # Non bloquant
+
+    return None  # Aucune clé fournie par l'environnement
+
+
 def init_firebase(cred_path=CRED_PATH):
-    """Initialise le SDK si la clé existe. Renvoie True si prêt."""
+    """Initialise le SDK Firebase. Renvoie True si prêt.
+
+    Priorité : variable d'environnement (production Dokploy) puis fichier local
+    serviceAccountKey.json (développement). Sans clé, Firebase reste désactivé
+    et le reste de la plateforme continue de fonctionner.
+    """
     global _initialized  # Permet de modifier la variable module _initialized
     if _initialized:  # Déjà prêt : évite une double initialisation
         return True
-    if not os.path.exists(cred_path):  # Pas de clé → Firebase reste désactivé
-        return False
     try:
         import firebase_admin  # SDK admin Firebase (import différé pour accélérer le démarrage)
         from firebase_admin import credentials  # Chargement des identifiants de service
-        cred = credentials.Certificate(cred_path)  # Lit le fichier JSON de clé privée
+
+        infos = _charger_credentials_env()  # 1) Tente la clé fournie par l'environnement
+        if infos is not None:
+            cred = credentials.Certificate(infos)  # Clé issue de la variable d'env
+        elif os.path.exists(cred_path):  # 2) Sinon, fichier local (développement)
+            cred = credentials.Certificate(cred_path)  # Lit le fichier JSON de clé privée
+        else:  # Aucune source disponible → Firebase désactivé
+            return False
+
         firebase_admin.initialize_app(cred)  # Enregistre l'application Firebase côté serveur
         _initialized = True  # Marque le module comme prêt
         return True

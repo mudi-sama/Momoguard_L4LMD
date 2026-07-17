@@ -16,6 +16,7 @@ from flask import (Flask, request, jsonify, render_template, redirect,  # Framew
                    url_for, session, flash, Response)  # Sessions, URLs, messages flash, export CSV
 from flask_socketio import SocketIO  # WebSocket temps réel pour le dashboard
 from werkzeug.security import generate_password_hash, check_password_hash  # Hachage mots de passe
+from werkzeug.middleware.proxy_fix import ProxyFix  # HTTPS réel derrière Dokploy/Traefik
 from flask_wtf.csrf import CSRFProtect  # Protection CSRF des formulaires HTML
 from flask_limiter import Limiter  # Limitation de débit anti-abus
 from flask_limiter.util import get_remote_address  # Identifie le client par IP
@@ -46,11 +47,15 @@ _cors_origins = os.environ.get(
 )
 
 app = Flask(__name__)  # Instance principale de l'application Flask
+# Traefik (Dokploy) termine le TLS : Flask doit lire X-Forwarded-Proto / Host
+# sinon cookies Secure, redirections et url_for restent en http://.
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 app.config["SECRET_KEY"] = _secret  # Signe les cookies et jetons CSRF
 app.config.update(
     SESSION_COOKIE_HTTPONLY=True,  # Empêche JavaScript d'accéder au cookie de session
     SESSION_COOKIE_SAMESITE="Lax",  # Limite l'envoi du cookie cross-site
     SESSION_COOKIE_SECURE=_HTTPS,  # Cookie transmis uniquement en HTTPS si activé
+    PREFERRED_URL_SCHEME="https" if _HTTPS else "http",  # URLs générées en https derrière Traefik
     PERMANENT_SESSION_LIFETIME=timedelta(hours=8),  # Expiration session admin
 )
 
@@ -310,6 +315,23 @@ def twofa_disable():
     database.set_admin_totp(username, None)  # Supprime le secret TOTP
     _audit("Désactivation de la 2FA")
     return redirect(url_for("account"))
+
+
+# --- Santé / diagnostic (Dokploy, monitoring) ------------------------------
+
+@app.route("/health")  # Public : vérifie que le conteneur répond + quels services sont actifs
+@csrf.exempt
+def health():
+    """État des services pour diagnostiquer un déploiement Dokploy."""
+    return jsonify({
+        "ok": True,
+        "env": "production" if _PRODUCTION else "development",
+        "https_cookies": _HTTPS,
+        "firebase": firebase_auth.is_ready(),
+        "safe_browsing": threat_intel.is_ready(),
+        "database": database.DATABASE_URL.split("://", 1)[0],  # sqlite / postgresql / mysql
+        "data_dir": database._DATA_DIR,
+    })
 
 
 # --- Dashboard -------------------------------------------------------------
@@ -993,6 +1015,12 @@ def main():  # Point d'entrée du serveur MoMoGuard
         print("[Firebase] authentification client activée")  # Firebase opérationnel
     else:  # Clé de service absente ou invalide
         print("[Firebase] clé absente — authentification client désactivée")  # Mode dégradé
+        print("[Firebase] fournis FIREBASE_CREDENTIALS_BASE64 (Dokploy) "
+              "ou serviceAccountKey.json (local)")
+    if threat_intel.is_ready():
+        print("[ThreatIntel] Google Safe Browsing activé")
+    else:
+        print("[ThreatIntel] SAFEBROWSING_API_KEY absente — réputation URL désactivée")
     # En développement, on écoute sur toutes les interfaces (0.0.0.0) pour que
     # l'app mobile sur le même Wi-Fi puisse joindre le serveur. En production,
     # on garde 127.0.0.1 par défaut (à placer derrière un reverse-proxy).
@@ -1005,7 +1033,12 @@ def main():  # Point d'entrée du serveur MoMoGuard
         debug = False
     print("=" * 60)
     print(" MoMoGuard - serveur central")
+    print(f" Env       : {'production' if _PRODUCTION else 'development'}")
+    print(f" Database  : {database.DATABASE_URL.split('://', 1)[0]}  ({database._DATA_DIR})")
+    print(f" Firebase  : {'ON' if firebase_auth.is_ready() else 'OFF'}")
+    print(f" SafeBrows : {'ON' if threat_intel.is_ready() else 'OFF'}")
     print(f" Dashboard : http://127.0.0.1:{port}  (connexion requise)")
+    print(f" Health    : http://127.0.0.1:{port}/health")
     if host == "0.0.0.0":  # Serveur accessible depuis le réseau local
         lan = _lan_ips()  # Détecte les adresses LAN de ce PC
         if lan:
@@ -1021,7 +1054,7 @@ def main():  # Point d'entrée du serveur MoMoGuard
               "(utilise MOMOGUARD_HOST=0.0.0.0).")
     print(f" API       : POST http://{host}:{port}/report")
     if _HTTPS:
-        print(" HTTPS     : SESSION_COOKIE_SECURE activé")
+        print(" HTTPS     : SESSION_COOKIE_SECURE + ProxyFix activés")
     print("=" * 60)
     # Derrière Dokploy/Traefik : un seul process Python est acceptable.
     # Sans allow_unsafe_werkzeug=True, SocketIO refuse de démarrer en production

@@ -21,7 +21,12 @@ from sqlalchemy import (create_engine, MetaData, Table, Column, Integer,  # Mote
 
 # === Choix de la base de données ===========================================
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # Répertoire racine du projet (parent de server/)
-_DEFAULT_DB = "sqlite:///" + os.path.join(_ROOT, "momoguard.db").replace("\\", "/")  # URL SQLite par défaut vers momoguard.db
+# Répertoire des données persistantes. En local : racine du projet. En production
+# (Docker/Dokploy) : définir MOMOGUARD_DATA_DIR=/app/data et monter un volume
+# sur ce dossier pour conserver la base SQLite entre deux déploiements.
+_DATA_DIR = os.environ.get("MOMOGUARD_DATA_DIR", _ROOT)  # Dossier où stocker momoguard.db
+os.makedirs(_DATA_DIR, exist_ok=True)  # Crée le dossier de données s'il n'existe pas encore
+_DEFAULT_DB = "sqlite:///" + os.path.join(_DATA_DIR, "momoguard.db").replace("\\", "/")  # URL SQLite par défaut
 DATABASE_URL = os.environ.get("MOMOGUARD_DB", _DEFAULT_DB)  # URL effective : variable d'env ou valeur par défaut SQLite
 # Exemple WAMP / MySQL :
 # DATABASE_URL = "mysql+pymysql://root:@127.0.0.1:3306/momoguard"

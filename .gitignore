@@ -17,6 +17,8 @@ backups/
 # Secrets — NE JAMAIS committer
 serviceAccountKey.json
 .env
+.env.dokploy*
+*.local
 
 # Android
 android_agent/google-services.json

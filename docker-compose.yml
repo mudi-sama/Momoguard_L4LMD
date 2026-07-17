@@ -1,4 +1,4 @@
-# Déploiement MoMoGuard sur Dokploy (Compose).
+# Déploiement MoMoGuard sur Dokploy (Compose) ou en local.
 # Les variables viennent de l'onglet Environment de Dokploy (.env généré).
 services:
   momoguard:
@@ -9,6 +9,10 @@ services:
     ports:
       - "5000:5000"
     volumes:
-      # Monte la clé Firebase (crée le fichier sur le VPS ou via un volume Dokploy).
-      - ./serviceAccountKey.json:/app/serviceAccountKey.json:ro
-    # Si tu ajoutes une base Postgres Dokploy, pointe MOMOGUARD_DB vers elle.
+      # Persistance SQLite (admin, 2FA, alertes, utilisateurs) entre redéploiements
+      - momoguard_data:/app/data
+    environment:
+      - MOMOGUARD_DATA_DIR=/app/data
+
+volumes:
+  momoguard_data:
