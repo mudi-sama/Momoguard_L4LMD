@@ -37,6 +37,7 @@ lignes = [
     "MOMOGUARD_PORT=5000",
     "MOMOGUARD_HTTPS=1",
     "MOMOGUARD_DATA_DIR=/app/data",
+    "MOMOGUARD_SESSION_MINUTES=30",
     f"MOMOGUARD_CORS_ORIGINS={domaine}",
     f"FIREBASE_CREDENTIALS_BASE64={b64}",
     "# Optionnel — décommente si tu as une clé Google Safe Browsing :",

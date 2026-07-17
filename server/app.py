@@ -36,6 +36,11 @@ _LOCKOUT_MINUTES = 15  # Durée du verrouillage temporaire du compte admin
 # Fenêtre TOTP élargie (±60 s) : les VPS / conteneurs ont souvent une horloge
 # légèrement décalée par rapport au téléphone (Google Authenticator).
 _TOTP_WINDOW = 2
+# Durée max d'inactivité de la session admin (minutes). Configurable via env.
+try:
+    _SESSION_MINUTES = max(5, int(os.environ.get("MOMOGUARD_SESSION_MINUTES", "30")))
+except ValueError:
+    _SESSION_MINUTES = 30
 
 _secret = os.environ.get("MOMOGUARD_SECRET")
 if _PRODUCTION and not _secret:
@@ -59,9 +64,9 @@ app.config.update(
     SESSION_COOKIE_SAMESITE="Lax",  # Limite l'envoi du cookie cross-site
     SESSION_COOKIE_SECURE=_HTTPS,  # Cookie transmis uniquement en HTTPS si activé
     PREFERRED_URL_SCHEME="https" if _HTTPS else "http",  # URLs générées en https derrière Traefik
-    # Session « navigateur » : le cookie disparaît à la fermeture du navigateur
-    # (pas de Max-Age). Sans ça, l'admin restait connecté 8 h sans re-login / 2FA.
-    PERMANENT_SESSION_LIFETIME=timedelta(hours=8),  # Utilisé seulement si session.permanent=True
+    # Session permanente à durée courte : déconnexion après N minutes d'inactivité
+    # même si le navigateur reste ouvert (glissante grâce à SESSION_REFRESH_EACH_REQUEST).
+    PERMANENT_SESSION_LIFETIME=timedelta(minutes=_SESSION_MINUTES),
     SESSION_REFRESH_EACH_REQUEST=True,
     # Derrière Traefik : ne pas exiger le header Referer (certains navigateurs /
     # politiques le retirent). Le jeton CSRF du formulaire reste obligatoire.
@@ -185,7 +190,7 @@ def login():  # Authentification administrateur
                 session["pending_2fa"] = username  # Session intermédiaire avant code TOTP
                 return redirect(url_for("login_2fa"))  # Étape 2 : saisie du code
             session["admin"] = username  # Session admin établie
-            session.permanent = False  # Cookie de session : expire à la fermeture du navigateur
+            session.permanent = True  # Applique PERMANENT_SESSION_LIFETIME (ex. 30 min)
             database.add_audit(username, "Connexion réussie")  # Trace dans le journal
             return redirect(url_for("dashboard"))  # Redirige vers le tableau de bord
         # Échec : on comptabilise l'essai sur le compte visé (s'il existe).
@@ -220,7 +225,7 @@ def login_2fa():  # Vérification du code à 6 chiffres
             database.reset_failed_login(username)  # Succès : réinitialise le compteur d'échecs
             session.pop("pending_2fa", None)  # Nettoie l'état intermédiaire
             session["admin"] = username  # Connexion finalisée
-            session.permanent = False  # Cookie de session : expire à la fermeture du navigateur
+            session.permanent = True  # Applique PERMANENT_SESSION_LIFETIME (ex. 30 min)
             database.add_audit(username, "Connexion réussie (2FA)")
             return redirect(url_for("dashboard"))
         # Code invalide : comptabilise l'échec sur le même compte.
@@ -1078,6 +1083,7 @@ def main():  # Point d'entrée du serveur MoMoGuard
     print(" MoMoGuard - serveur central")
     print(f" Env       : {'production' if _PRODUCTION else 'development'}")
     print(f" Database  : {database.DATABASE_URL.split('://', 1)[0]}  ({database._DATA_DIR})")
+    print(f" Session   : {_SESSION_MINUTES} min d'inactivité max")
     print(f" Firebase  : {'ON' if firebase_auth.is_ready() else 'OFF'}")
     print(f" SafeBrows : {'ON' if threat_intel.is_ready() else 'OFF'}")
     print(f" Dashboard : http://127.0.0.1:{port}  (connexion requise)")
