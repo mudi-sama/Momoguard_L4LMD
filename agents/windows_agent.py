@@ -28,8 +28,33 @@ from watchdog.events import FileSystemEventHandler  # Classe de base pour les é
 # --- Configuration ---------------------------------------------------------
 SERVER_URL = os.environ.get("MOMOGUARD_SERVER_URL", "http://127.0.0.1:5000/report")
 AGENT_ID = os.environ.get("MOMOGUARD_AGENT_ID", "windows-pc-01")
-# Jeton obligatoire : déclarez l'agent dans le dashboard et copiez le jeton ici.
-AGENT_TOKEN = os.environ.get("MOMOGUARD_AGENT_TOKEN", "")
+
+
+def _lire_jeton():
+    """Récupère le jeton d'agent : variable d'environnement, sinon fichier local.
+
+    Ordre de priorité :
+      1. MOMOGUARD_AGENT_TOKEN (variable d'environnement) ;
+      2. fichier pointé par MOMOGUARD_AGENT_TOKEN_FILE ;
+      3. fichier agent_token.txt placé à côté de ce script (persistant).
+    Cela évite d'avoir à reconfigurer le jeton à chaque lancement du terminal."""
+    jeton = os.environ.get("MOMOGUARD_AGENT_TOKEN", "").strip()  # 1) variable d'environnement
+    if jeton:
+        return jeton
+    chemin = os.environ.get(  # 2) chemin de fichier explicite, sinon 3) fichier par défaut
+        "MOMOGUARD_AGENT_TOKEN_FILE",
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "agent_token.txt"),
+    )
+    try:
+        with open(chemin, "r", encoding="utf-8") as f:  # Lecture du jeton persistant
+            return f.read().strip()  # Nettoie espaces et retours à la ligne
+    except OSError:
+        return ""  # Aucun jeton disponible : l'agent le signalera
+
+
+# Jeton obligatoire : déclarez l'agent dans le dashboard et collez le jeton
+# soit dans MOMOGUARD_AGENT_TOKEN, soit dans agents/agent_token.txt.
+AGENT_TOKEN = _lire_jeton()
 DOWNLOADS_DIR = os.path.join(os.path.expanduser("~"), "Downloads")  # Dossier Téléchargements de l'utilisateur
 POLL_SECONDS = 1.5  # Intervalle entre deux lectures du presse-papier
 BROWSER_POLL_SECONDS = 3.0  # Intervalle entre deux lectures de l'historique navigateur
@@ -149,7 +174,8 @@ def _lire_visites_firefox(chemin_places, depuis_us):
 def envoyer(event_type, content, metadata=None):
     """Envoie un rapport au serveur et affiche le verdict reçu."""
     if not AGENT_TOKEN:
-        print("  !! AGENT_TOKEN manquant — enregistrez l'agent dans le dashboard")
+        print("  !! AGENT_TOKEN manquant — collez le jeton dans agents/agent_token.txt "
+              "ou dans la variable MOMOGUARD_AGENT_TOKEN")
         return
     payload = {  # Corps JSON de la requête POST
         "agent_id": AGENT_ID,  # Identifiant de l'agent émetteur

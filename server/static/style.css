@@ -197,6 +197,7 @@ button:active { transform: translateY(0); }
 .btn-ghost:hover { background: rgba(226,57,80,.12); filter: none; transform: none; }
 .btn-ghost.ok { color: var(--faible); border-color: rgba(18,160,108,.4); }
 .btn-ghost.ok:hover { background: rgba(18,160,108,.12); }
+.btn-sm { padding: 5px 10px; font-size: 12px; text-decoration: none; display: inline-flex; align-items: center; }
 .btn-link { display: inline-block; text-decoration: none; background: var(--surface-2); color: var(--text); border: 1px solid var(--border); border-radius: 10px; padding: 10px 16px; font-size: 13px; font-weight: 600; box-shadow: none; }
 .btn-link:hover { border-color: var(--brand); filter: none; transform: none; }
 

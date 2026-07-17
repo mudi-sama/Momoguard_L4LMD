@@ -47,6 +47,25 @@
     </div>
 
     <div class="card" style="margin-top:18px;">
+      <h2>Agent attribué</h2>
+      <p class="lead">Appareil Android rattaché à ce compte (relation 1:1). Les rapports de ce compte sont émis sous cet agent.</p>
+      {% if agent %}
+      <table class="kv">
+        <tr><td>Identifiant agent</td><td class="mono">{{ agent.agent_id }}</td></tr>
+        <tr><td>Plateforme</td><td>{{ agent.platform or '—' }}</td></tr>
+        <tr><td>Statut</td><td>{{ 'Bloqué' if agent.status == 'blocked' else 'Actif' }}</td></tr>
+        <tr><td>Connectivité</td><td>{{ 'En ligne' if agent.online else 'Hors ligne' }}</td></tr>
+        <tr><td>Dernière activité</td><td>{{ agent.last_seen or 'jamais' }}</td></tr>
+      </table>
+      <div class="actions" style="margin-top:12px;">
+        <a href="{{ url_for('agents') }}" class="btn-link">Gérer dans les agents →</a>
+      </div>
+      {% else %}
+      <p class="empty">Aucun agent attribué pour l'instant.</p>
+      {% endif %}
+    </div>
+
+    <div class="card" style="margin-top:18px;">
       <h2>Modifier l'utilisateur</h2>
       <p class="lead">Mets à jour le nom affiché de ce compte.</p>
       <form method="POST" action="{{ url_for('user_edit', uid=user.uid) }}">

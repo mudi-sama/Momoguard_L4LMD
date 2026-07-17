@@ -5,8 +5,15 @@
 
 {% block content %}
   <main class="form-wrap wide">
+    {% if sync_msg %}<p class="success">{{ sync_msg }}</p>{% endif %}
+    {% if firebase_ready %}
+    <form method="POST" action="{{ url_for('users_sync') }}" class="inline-form" style="margin-bottom:16px">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="btn-ghost ok">Synchroniser depuis Firebase</button>
+    </form>
+    {% endif %}
     {% if not users %}
-      <p class="empty">Aucun compte client pour l'instant. Les utilisateurs apparaissent ici après s'être inscrits dans l'app et avoir lié leur compte.</p>
+      <p class="empty">Aucun compte client pour l'instant. Les utilisateurs apparaissent ici après s'être inscrits dans l'app et avoir lié leur compte, ou via « Synchroniser depuis Firebase ».</p>
     {% else %}
       <ul class="feed">
         {% for u in users %}

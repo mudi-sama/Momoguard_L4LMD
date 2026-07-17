@@ -54,10 +54,11 @@
             </form>
             {% endif %}
             <form method="POST" action="{{ url_for('agent_remove', agent_id=a.agent_id) }}" class="inline-form"
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                   onsubmit="return confirm('Retirer définitivement cet agent ?');">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <button type="submit" class="btn-ghost">Retirer</button>
             </form>
+            <a href="{{ url_for('agents') }}" class="btn-ghost ok btn-sm" title="Recharger pour relocaliser les agents">Actualiser</a>
           </div>
         </li>
         {% endfor %}

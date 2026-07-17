@@ -449,7 +449,10 @@ def _agent_to_dict(r):
 
 
 def register_agent(agent_id, label, platform, token=None):
-    """Enregistre un agent s'il n'existe pas, puis retourne sa fiche."""
+    """Enregistre un agent, ou réémet son jeton s'il existe déjà.
+
+    Un ré-enregistrement depuis le dashboard régénère le jeton : le jeton
+    affiché correspond ainsi toujours à celui stocké en base (évite les 401)."""
     existing = get_agent(agent_id)  # Vérifie si l'agent est déjà connu
     if existing is None:  # Première inscription
         with engine.begin() as conn:  # Transaction
@@ -457,6 +460,14 @@ def register_agent(agent_id, label, platform, token=None):
                 agent_id=agent_id, label=label, platform=platform,  # Identité
                 status="active", token=token, created_at=_now(),  # Actif par défaut, jeton optionnel, date
             ))
+    else:  # Agent déjà présent : on met à jour le libellé/plateforme et le jeton fourni
+        valeurs = {"label": label, "platform": platform}  # Champs d'identité rafraîchis
+        if token is not None:  # Réémission d'un nouveau jeton fonctionnel
+            valeurs["token"] = token  # Le jeton stocké correspondra à celui affiché
+        with engine.begin() as conn:  # Transaction
+            conn.execute(  # UPDATE de la fiche existante
+                sa_update(agents).where(agents.c.agent_id == agent_id).values(**valeurs)
+            )
     return get_agent(agent_id)  # Retourne la fiche à jour (existante ou nouvellement créée)
 
 
@@ -529,7 +540,38 @@ def upsert_user(uid, email, display_name, ip=None):
             if ip:  # IP fournie cette fois
                 vals["ip"] = ip  # Met à jour l'adresse IP
             conn.execute(sa_update(users).where(users.c.uid == uid).values(**vals))  # UPDATE par uid
+    ensure_agent_for_user(uid, display_name or email)  # Attribue (ou confirme) l'agent lié au compte
     return get_user_by_uid(uid)  # Retourne la fiche à jour
+
+
+def import_firebase_user(uid, email, display_name):
+    """Insère un compte Firebase dans la base locale s'il est absent.
+
+    Utilisé par la synchronisation Firebase → dashboard. N'écrase jamais un
+    compte existant (préserve son statut d'approbation). Retourne True si un
+    nouveau compte a été créé, False s'il existait déjà."""
+    if get_user_by_uid(uid) is not None:  # Compte déjà présent : on ne touche à rien
+        ensure_agent_for_user(uid, display_name or email)  # Garantit tout de même l'agent attribué
+        return False
+    with engine.begin() as conn:  # Transaction
+        conn.execute(sa_insert(users).values(  # INSERT du compte importé
+            uid=uid, email=email, display_name=display_name,  # Identité Firebase
+            status="pending", created_at=_now(),  # En attente d'approbation admin
+        ))
+    ensure_agent_for_user(uid, display_name or email)  # Crée l'agent attribué à ce compte
+    return True  # Nouveau compte créé
+
+
+def ensure_agent_for_user(uid, label=None):
+    """Garantit qu'un agent est attribué à ce compte utilisateur (Android).
+
+    L'agent porte l'identifiant `android-<uid>` (le même que celui utilisé pour
+    les rapports Android). Créé s'il n'existe pas encore. Retourne l'agent_id."""
+    agent_id = f"android-{uid}"  # Identifiant d'agent dérivé de l'UID (relation 1:1 compte↔agent)
+    if get_agent(agent_id) is None:  # Aucun agent attribué pour l'instant
+        libelle = (label or agent_id)  # Libellé lisible (nom/email si dispo)
+        register_agent(agent_id, f"{libelle} (Android)", "android", token=None)  # Sans jeton : auth par compte Firebase
+    return agent_id  # Identifiant de l'agent attribué
 
 
 def update_user(uid, display_name):

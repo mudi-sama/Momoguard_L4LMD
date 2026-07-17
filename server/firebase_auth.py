@@ -52,6 +52,25 @@ def verify_id_token(id_token):
     return auth.verify_id_token(id_token)  # Valide la signature et l'expiration du jeton
 
 
+def list_users():
+    """Retourne la liste des comptes Firebase Authentication (uid, email, nom).
+
+    Lève RuntimeError si Firebase n'est pas initialisé. Utilisé pour synchroniser
+    les comptes Firebase vers la base locale du dashboard de supervision.
+    """
+    if not _initialized:  # Impossible sans clé de service
+        raise RuntimeError("Firebase non configuré")
+    from firebase_admin import auth  # Module d'authentification Firebase
+    comptes = []  # Accumulateur des comptes trouvés
+    for u in auth.list_users().iterate_all():  # Parcourt tous les utilisateurs (pagination gérée)
+        comptes.append({  # Champs utiles pour la base locale
+            "uid": u.uid,  # Identifiant Firebase unique
+            "email": u.email or "",  # Adresse e-mail (peut être vide)
+            "display_name": u.display_name or "",  # Nom affiché éventuel
+        })
+    return comptes  # Liste de dictionnaires
+
+
 def send_push(fcm_token, title, body):
     """Envoie une notification push à un appareil via Firebase Cloud Messaging.
 
