@@ -26,8 +26,41 @@ from watchdog.observers import Observer  # Observateur du système de fichiers
 from watchdog.events import FileSystemEventHandler  # Classe de base pour les événements fichiers
 
 # --- Configuration ---------------------------------------------------------
-SERVER_URL = os.environ.get("MOMOGUARD_SERVER_URL", "http://127.0.0.1:5000/report")
+# Serveur en ligne (Dokploy) par défaut. Pour le local : mets
+# http://127.0.0.1:5000 dans agents/server_url.txt ou MOMOGUARD_SERVER_URL.
+_DEFAULT_SERVER = "https://momoguardserv.com"
+_AGENT_DIR = os.path.dirname(os.path.abspath(__file__))
 AGENT_ID = os.environ.get("MOMOGUARD_AGENT_ID", "windows-pc-01")
+
+
+def _lire_fichier(chemin):
+    """Lit un fichier texte local (jeton, URL…) ; chaîne vide si absent."""
+    try:
+        with open(chemin, "r", encoding="utf-8") as f:
+            return f.read().strip()
+    except OSError:
+        return ""
+
+
+def _normaliser_url_serveur(url):
+    """Accepte une base (https://host) ou l'endpoint /report complet."""
+    u = (url or "").strip().rstrip("/")
+    if not u:
+        return _DEFAULT_SERVER.rstrip("/") + "/report"
+    if u.endswith("/report"):
+        return u
+    return u + "/report"
+
+
+def _lire_url_serveur():
+    """URL du serveur : env, puis agents/server_url.txt, puis production."""
+    env = os.environ.get("MOMOGUARD_SERVER_URL", "").strip()
+    if env:
+        return _normaliser_url_serveur(env)
+    fichier = _lire_fichier(os.path.join(_AGENT_DIR, "server_url.txt"))
+    if fichier:
+        return _normaliser_url_serveur(fichier)
+    return _normaliser_url_serveur(_DEFAULT_SERVER)
 
 
 def _lire_jeton():
@@ -43,17 +76,14 @@ def _lire_jeton():
         return jeton
     chemin = os.environ.get(  # 2) chemin de fichier explicite, sinon 3) fichier par défaut
         "MOMOGUARD_AGENT_TOKEN_FILE",
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "agent_token.txt"),
+        os.path.join(_AGENT_DIR, "agent_token.txt"),
     )
-    try:
-        with open(chemin, "r", encoding="utf-8") as f:  # Lecture du jeton persistant
-            return f.read().strip()  # Nettoie espaces et retours à la ligne
-    except OSError:
-        return ""  # Aucun jeton disponible : l'agent le signalera
+    return _lire_fichier(chemin)
 
 
-# Jeton obligatoire : déclarez l'agent dans le dashboard et collez le jeton
-# soit dans MOMOGUARD_AGENT_TOKEN, soit dans agents/agent_token.txt.
+# Jeton obligatoire : déclarez l'agent dans le dashboard EN LIGNE et collez le
+# jeton dans agents/agent_token.txt (ou MOMOGUARD_AGENT_TOKEN).
+SERVER_URL = _lire_url_serveur()
 AGENT_TOKEN = _lire_jeton()
 DOWNLOADS_DIR = os.path.join(os.path.expanduser("~"), "Downloads")  # Dossier Téléchargements de l'utilisateur
 POLL_SECONDS = 1.5  # Intervalle entre deux lectures du presse-papier
@@ -186,18 +216,25 @@ def envoyer(event_type, content, metadata=None):
         "token": AGENT_TOKEN,  # Jeton d'authentification de l'agent
     }
     try:
-        r = requests.post(SERVER_URL, json=payload, timeout=5)  # Envoi HTTP avec délai max 5 s
-        if r.status_code == 403:  # Agent désactivé par l'administrateur
-            print("  !! cet agent est BLOQUÉ par l'administrateur")
-            return  # Abandon sans traiter la réponse
+        r = requests.post(SERVER_URL, json=payload, timeout=15)  # Timeout plus long (serveur distant)
+        if r.status_code == 403:  # Bloqué ou non enregistré sur ce serveur
+            detail = ""
+            try:
+                detail = (r.json() or {}).get("error", "")
+            except Exception:
+                pass
+            print(f"  !! refusé (403) : {detail or 'agent bloqué ou non déclaré sur le serveur'}")
+            print("  !! crée/active l'agent sur https://momoguardserv.com → Agents")
+            return
         if r.status_code == 401:  # Jeton invalide ou absent
-            print("  !! jeton d'agent invalide (vérifie AGENT_TOKEN)")
-            return  # Abandon : authentification refusée
+            print("  !! jeton d'agent invalide — déclare l'agent sur "
+                  "https://momoguardserv.com (Agents) et mets à jour agent_token.txt")
+            return
         data = r.json()  # Parse la réponse JSON du serveur (score, niveau)
         print(f"  -> envoyé [{event_type}] niveau={data.get('level')} "  # Affiche le verdict reçu
               f"score={data.get('score')}")
     except Exception as e:  # Erreur réseau, timeout ou JSON invalide
-        print(f"  !! échec d'envoi : {e}")  # Informe l'utilisateur de l'échec
+        print(f"  !! échec d'envoi vers {SERVER_URL} : {e}")  # Informe l'utilisateur de l'échec
 
 
 def merite_analyse(texte):
@@ -291,7 +328,10 @@ def main():
     print("=" * 60)  # Séparateur visuel de démarrage
     print(" Agent Windows MoMoGuard (transparent)")  # Titre de l'agent
     print(f" Serveur : {SERVER_URL}")  # URL du serveur cible
+    print(f" Agent   : {AGENT_ID}")
+    print(f" Jeton   : {'OK' if AGENT_TOKEN else 'MANQUANT (agents/agent_token.txt)'}")
     print(f" Dossier surveillé : {DOWNLOADS_DIR}")  # Dossier Téléchargements
+    print(" Config  : agents/server_url.txt (optionnel) | agents/agent_token.txt")
     print(" Arrêt : Ctrl+C")  # Instruction d'arrêt manuel
     print("=" * 60)  # Fin du bandeau d'accueil
 

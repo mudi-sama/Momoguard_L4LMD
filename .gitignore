@@ -19,6 +19,8 @@ serviceAccountKey.json
 .env
 .env.dokploy*
 *.local
+agents/agent_token.txt
+agents/server_url.txt
 
 # Android
 android_agent/google-services.json
