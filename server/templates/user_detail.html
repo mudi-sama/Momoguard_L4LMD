@@ -12,6 +12,7 @@
       <div class="report-top">
         <h2 style="margin:0;">{{ user.display_name or user.email or user.uid }}</h2>
         <span class="badge {{ lvl }}">{{ label }}</span>
+        {% if user.pending_device_id %}<span class="badge moyen">Nouvel appareil</span>{% endif %}
       </div>
       <table class="kv">
         <tr><td>Nom</td><td>{{ user.display_name or '—' }}</td></tr>
@@ -27,10 +28,12 @@
         {% if user.status != 'approved' %}
         <form method="POST" action="{{ url_for('user_approve', uid=user.uid) }}" class="inline-form">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-          <button type="submit" class="btn-ghost ok">Approuver</button>
+          <button type="submit" class="btn-ghost ok">
+            {% if user.pending_device_id %}Approuver le compte + nouvel appareil{% else %}Approuver{% endif %}
+          </button>
         </form>
         {% endif %}
-        {% if user.status == 'pending' %}
+        {% if user.status == 'pending' and not user.pending_device_id %}
         <form method="POST" action="{{ url_for('user_reject', uid=user.uid) }}" class="inline-form">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <button type="submit" class="btn-ghost">Refuser</button>
@@ -44,6 +47,33 @@
         {% endif %}
         <a href="{{ url_for('users') }}" class="btn-link">← Retour à la liste</a>
       </div>
+    </div>
+
+    <div class="card" style="margin-top:18px;">
+      <h2>Appareil</h2>
+      <p class="lead">Détection de changement d'appareil (mode strict) : un nouvel appareil remet le compte en attente jusqu'à votre validation.</p>
+      <table class="kv">
+        <tr><td>Appareil de confiance</td><td>{{ user.device_label or '—' }}</td></tr>
+        <tr><td>Identifiant appareil</td><td class="mono">{{ user.device_id or 'non enregistré' }}</td></tr>
+        <tr><td>Dernier changement</td><td>{{ user.device_changed_at or '—' }}</td></tr>
+      </table>
+      {% if user.pending_device_id %}
+      <p class="alert" style="margin-top:14px;">
+        <strong>Nouvel appareil en attente :</strong>
+        {{ user.pending_device_label or user.pending_device_id }}
+      </p>
+      <div class="actions" style="margin-top:12px;">
+        <form method="POST" action="{{ url_for('user_approve_device', uid=user.uid) }}" class="inline-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="btn-ghost ok">Approuver ce nouvel appareil</button>
+        </form>
+        <form method="POST" action="{{ url_for('user_reject_device', uid=user.uid) }}" class="inline-form"
+              onsubmit="return confirm('Refuser ce nouvel appareil ?');">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="btn-ghost">Refuser le nouvel appareil</button>
+        </form>
+      </div>
+      {% endif %}
     </div>
 
     <div class="card" style="margin-top:18px;">

@@ -27,16 +27,22 @@
               <span>· inscrit le {{ u.created_at }}</span>
             </div>
             <span class="badge {{ lvl }}">{{ label }}</span>
+            {% if u.pending_device_id %}<span class="badge moyen">Nouvel appareil</span>{% endif %}
           </div>
+          {% if u.pending_device_id %}
+          <p class="muted" style="margin:6px 0 0;">Nouvel appareil en attente : {{ u.pending_device_label or u.pending_device_id }}</p>
+          {% endif %}
           <div class="actions">
             <a href="{{ url_for('user_detail', uid=u.uid) }}" class="btn-link">Gérer</a>
             {% if u.status != 'approved' %}
             <form method="POST" action="{{ url_for('user_approve', uid=u.uid) }}" class="inline-form">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-              <button type="submit" class="btn-ghost ok">Approuver</button>
+              <button type="submit" class="btn-ghost ok">
+                {% if u.pending_device_id %}Approuver + appareil{% else %}Approuver{% endif %}
+              </button>
             </form>
             {% endif %}
-            {% if u.status == 'pending' %}
+            {% if u.status == 'pending' and not u.pending_device_id %}
             <form method="POST" action="{{ url_for('user_reject', uid=u.uid) }}" class="inline-form">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <button type="submit" class="btn-ghost">Refuser</button>

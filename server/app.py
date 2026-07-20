@@ -766,16 +766,39 @@ def auth_firebase():  # Vérifie le jeton Firebase et crée ou met à jour l'uti
     uid = decoded.get("uid")  # Identifiant Firebase unique de l'utilisateur
     email = decoded.get("email", "")  # Adresse courriel du compte Firebase
     name = decoded.get("name", "")  # Nom affiché du profil Firebase
+    device_id = (data.get("device_id") or "").strip()  # Empreinte d'installation Android
+    device_label = (data.get("device_label") or "").strip()  # Ex. « Samsung Galaxy A14 »
+    fcm = (data.get("fcm_token") or "").strip() or None  # Optionnel à la liaison
     # IP du client (gère le cas d'un proxy via X-Forwarded-For)
     ip = (request.headers.get("X-Forwarded-For", "").split(",")[0].strip()  # Première IP si proxy
           or request.remote_addr)  # Sinon adresse IP directe du client
     user = database.upsert_user(uid, email, name, ip=ip)  # Crée ou met à jour l'utilisateur en base
+
+    device_changed = False
+    first_device = False
+    if device_id:
+        result = database.register_device(uid, device_id, device_label, fcm_token=fcm)
+        if result:
+            device_changed = result["device_changed"]
+            first_device = result["first_device"]
+            user = result["user"]
+            if device_changed:
+                _notify_old_device_change(user, device_label)
+                database.add_audit(
+                    "systeme", "Changement d'appareil détecté",
+                    target=uid,
+                    details=f"nouveau={device_label or device_id}",
+                )
 
     return jsonify({  # Réponse JSON avec l'état du compte
         "ok": True,  # Authentification réussie
         "uid": user["uid"],  # UID renvoyé à l'application
         "email": user["email"],  # Courriel enregistré
         "status": user["status"],  # Statut d'approbation (pending, approved, etc.)
+        "device_changed": device_changed,
+        "first_device": first_device,
+        "device_label": user.get("device_label"),
+        "pending_device_label": user.get("pending_device_label"),
     })
 
 
@@ -813,6 +836,21 @@ def my_reports():  # Renvoie les rapports associés à l'UID Firebase authentifi
     })
 
 
+def _notify_old_device_change(user, new_label):
+    """Préviens l'ancien téléphone qu'un nouvel appareil tente de se connecter."""
+    old_fcm = user.get("fcm_token")
+    if not old_fcm:
+        return
+    label = new_label or "un nouvel appareil"
+    firebase_auth.send_push(
+        old_fcm,
+        "MoMoGuard — nouvel appareil",
+        f"Connexion détectée depuis {label}. "
+        "Si ce n'est pas vous, contactez l'administrateur. "
+        "Le compte est en attente d'approbation.",
+    )
+
+
 @app.route("/api/fcm-token", methods=["POST"])  # API d'enregistrement du jeton push FCM
 @csrf.exempt  # Exemptée du CSRF (app mobile)
 @limiter.limit("30 per minute")
@@ -823,6 +861,8 @@ def fcm_token():  # Enregistre ou met à jour le jeton FCM pour les notification
     data = request.get_json(silent=True) or {}  # Corps JSON de la requête
     id_token = data.get("id_token")  # Jeton Firebase pour authentifier le client
     fcm = data.get("fcm_token")  # Jeton FCM de l'appareil pour les push
+    device_id = (data.get("device_id") or "").strip()
+    device_label = (data.get("device_label") or "").strip()
     if not id_token or not fcm:  # Les deux champs sont requis
         return jsonify({"error": "id_token et fcm_token requis"}), 400  # Requête incomplète
     try:  # Validation du jeton Firebase
@@ -831,10 +871,35 @@ def fcm_token():  # Enregistre ou met à jour le jeton FCM pour les notification
         return jsonify({"error": "Jeton Firebase invalide ou expiré"}), 401  # Non autorisé
     uid = decoded.get("uid")
     user = database.get_user_by_uid(uid)
-    if not user or user["status"] != "approved":
-        return jsonify({"error": _user_status_error(user["status"] if user else "unknown")}), 403
-    database.set_user_fcm_token(uid, fcm)  # Persiste le jeton FCM en base
-    return jsonify({"ok": True})  # Confirmation de l'enregistrement
+    if not user:
+        return jsonify({"error": "Compte non reconnu"}), 403
+
+    device_changed = False
+    if device_id:
+        result = database.register_device(uid, device_id, device_label, fcm_token=fcm)
+        if result:
+            device_changed = result["device_changed"]
+            user = result["user"]
+            if device_changed:
+                _notify_old_device_change(user, device_label)
+                database.add_audit(
+                    "systeme", "Changement d'appareil détecté (FCM)",
+                    target=uid,
+                    details=f"nouveau={device_label or device_id}",
+                )
+    else:
+        # Pas de device_id : comportement historique (même appareil supposé)
+        if user["status"] == "approved":
+            database.set_user_fcm_token(uid, fcm)
+        else:
+            return jsonify({"error": _user_status_error(user["status"])}), 403
+
+    user = database.get_user_by_uid(uid)
+    return jsonify({
+        "ok": True,
+        "status": user["status"] if user else "unknown",
+        "device_changed": device_changed,
+    })
 
 
 # --- Gestion des utilisateurs clients --------------------------------------
@@ -873,10 +938,42 @@ def users_sync():  # Importe dans le dashboard les comptes Firebase absents
 
 @app.route("/users/<uid>/approve", methods=["POST"])  # Route POST pour approuver un compte
 @login_required  # Admin requis
-def user_approve(uid):  # Passe le compte au statut « approuvé »
-    database.set_user_status(uid, "approved")  # Met à jour le statut en base
-    _audit("Utilisateur approuvé", target=uid)  # Journalise l'approbation
-    return redirect(url_for("users"))  # Retour à la liste des utilisateurs
+def user_approve(uid):  # Passe le compte au statut « approuvé » (+ nouvel appareil si pending)
+    user = database.get_user_by_uid(uid)
+    if user and user.get("pending_device_id"):
+        database.approve_pending_device(uid)  # Valide aussi le nouvel appareil
+        _audit("Nouvel appareil approuvé", target=uid,
+               details=user.get("pending_device_label") or user.get("pending_device_id"))
+    else:
+        database.set_user_status(uid, "approved")  # Met à jour le statut en base
+        _audit("Utilisateur approuvé", target=uid)  # Journalise l'approbation
+    return redirect(url_for("user_detail", uid=uid))
+
+
+@app.route("/users/<uid>/approve-device", methods=["POST"])
+@login_required
+def user_approve_device(uid):
+    """Approuve explicitement le nouvel appareil en attente."""
+    user = database.get_user_by_uid(uid)
+    if not user:
+        return redirect(url_for("users"))
+    database.approve_pending_device(uid)
+    _audit("Nouvel appareil approuvé", target=uid,
+           details=user.get("pending_device_label") or user.get("pending_device_id"))
+    return redirect(url_for("user_detail", uid=uid))
+
+
+@app.route("/users/<uid>/reject-device", methods=["POST"])
+@login_required
+def user_reject_device(uid):
+    """Refuse le nouvel appareil et restaure l'ancien (compte ré-approuvé)."""
+    user = database.get_user_by_uid(uid)
+    if not user:
+        return redirect(url_for("users"))
+    database.reject_pending_device(uid)
+    _audit("Nouvel appareil refusé", target=uid,
+           details=user.get("pending_device_label") or user.get("pending_device_id"))
+    return redirect(url_for("user_detail", uid=uid))
 
 
 @app.route("/users/<uid>/reject", methods=["POST"])  # Route POST pour refuser un compte
@@ -901,10 +998,7 @@ def user_detail(uid):  # Affiche le profil et les actions disponibles
     user = database.get_user_by_uid(uid)  # Récupère l'utilisateur par son UID
     if not user:  # Utilisateur introuvable
         return redirect(url_for("users"))  # Redirige vers la liste
-    agent_id = database.ensure_agent_for_user(uid, user.get("display_name") or user.get("email"))  # Agent attribué
-    agent = database.get_agent(agent_id)  # Fiche de l'agent lié au compte
-    if agent:  # Enrichit avec l'état en ligne/hors ligne
-        agent = _annotate_online([agent])[0]
+    agent = _user_detail_agent(uid, user)
     return render_template("user_detail.html", user=user, agent=agent,  # Affiche la fiche + agent attribué
                            ok=False, msg=None, erreur=None)
 
@@ -918,23 +1012,33 @@ def user_edit(uid):  # Met à jour le nom affiché du client
     return redirect(url_for("user_detail", uid=uid))  # Retour à la fiche utilisateur
 
 
+def _user_detail_agent(uid, user):
+    """Charge l'agent attribué pour les rendus de la fiche utilisateur."""
+    agent_id = database.ensure_agent_for_user(uid, user.get("display_name") or user.get("email"))
+    agent = database.get_agent(agent_id)
+    if agent:
+        agent = _annotate_online([agent])[0]
+    return agent
+
+
 @app.route("/users/<uid>/password", methods=["POST"])  # Route POST pour changer le mot de passe client
 @login_required  # Admin requis
 def user_password(uid):  # Réinitialise le mot de passe Firebase d'un client
     user = database.get_user_by_uid(uid)  # Récupère le profil utilisateur
     if not user:  # Utilisateur introuvable
         return redirect(url_for("users"))  # Redirige vers la liste
+    agent = _user_detail_agent(uid, user)
     new_pwd = request.form.get("new_password") or ""  # Nouveau mot de passe saisi par l'admin
     if len(new_pwd) < _MIN_PASSWORD_LEN:  # Longueur minimale requise
-        return render_template("user_detail.html", user=user, ok=False, msg=None,
+        return render_template("user_detail.html", user=user, agent=agent, ok=False, msg=None,
                                erreur=f"Le mot de passe doit faire au moins {_MIN_PASSWORD_LEN} caractères."), 400
     if not firebase_auth.is_ready():  # Firebase non configuré
-        return render_template("user_detail.html", user=user, ok=False, msg=None,  # Réaffiche avec erreur
+        return render_template("user_detail.html", user=user, agent=agent, ok=False, msg=None,
                                erreur="Firebase non configuré : changement impossible."), 503  # Service indisponible
     try:  # Tente la mise à jour côté Firebase Admin SDK
         firebase_auth.update_user_password(uid, new_pwd)  # Change le mot de passe dans Firebase
     except Exception as e:  # Erreur Firebase (compte inexistant, etc.)
-        return render_template("user_detail.html", user=user, ok=False, msg=None,  # Réaffiche avec erreur
+        return render_template("user_detail.html", user=user, agent=agent, ok=False, msg=None,
                                erreur=f"Échec de la mise à jour : {e}"), 500  # Erreur serveur
     notified = False  # Indique si une notification push a été envoyée
     if user.get("fcm_token"):  # Si l'utilisateur a un jeton FCM enregistré
@@ -948,7 +1052,7 @@ def user_password(uid):  # Réinitialise le mot de passe Firebase d'un client
               else "(Pas de notification : aucun jeton FCM enregistré pour ce compte.)"))  # Sinon absence de FCM
     _audit("Changement mot de passe utilisateur", target=uid,  # Journalise l'opération
            details=("notifié" if notified else "non notifié"))  # Précise si notification envoyée
-    return render_template("user_detail.html", user=database.get_user_by_uid(uid),  # Recharge la fiche à jour
+    return render_template("user_detail.html", user=database.get_user_by_uid(uid), agent=agent,
                            ok=True, msg=msg, erreur=None)  # Affiche le succès
 
 

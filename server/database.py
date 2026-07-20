@@ -90,11 +90,17 @@ users = Table(  # Table des utilisateurs clients authentifiés via Firebase
     Column("email", String(255)),  # Adresse e-mail du compte
     Column("display_name", String(255)),  # Nom affiché dans l'application
     Column("status", String(16), nullable=False, default="pending"),  # Statut d'approbation (pending, approved, blocked)
-    Column("fcm_token", String(255)),  # Jeton Firebase Cloud Messaging pour les notifications push
+    Column("fcm_token", String(512)),  # Jeton Firebase Cloud Messaging pour les notifications push
     Column("ip", String(64)),  # Dernière adresse IP connue de l'utilisateur
     Column("created_at", String(40), nullable=False),  # Date de première inscription
     Column("approved_at", String(40)),  # Date d'approbation par un administrateur
     Column("last_seen", String(40)),  # Dernière connexion ou activité
+    Column("device_id", String(64)),  # Empreinte d'installation de confiance (UUID app)
+    Column("device_label", String(255)),  # Libellé lisible (ex. Samsung Galaxy A14)
+    Column("pending_device_id", String(64)),  # Nouvel appareil en attente d'approbation
+    Column("pending_device_label", String(255)),  # Libellé du nouvel appareil
+    Column("pending_fcm_token", String(512)),  # FCM du nouvel appareil (en attente)
+    Column("device_changed_at", String(40)),  # Dernier changement / premier enregistrement
 )
 
 settings = Table(  # Table clé/valeur pour les paramètres globaux de l'application
@@ -142,6 +148,12 @@ def init_db():
     _ensure_column("admins", "locked_until", "VARCHAR(40)")  # Migration : date de fin de verrouillage du compte
     _ensure_column("users", "ip", "VARCHAR(64)")  # Migration : colonne IP sur users
     _ensure_column("users", "approved_at", "VARCHAR(40)")  # Migration : date d'approbation sur users
+    _ensure_column("users", "device_id", "VARCHAR(64)")  # Empreinte appareil de confiance
+    _ensure_column("users", "device_label", "VARCHAR(255)")  # Libellé appareil
+    _ensure_column("users", "pending_device_id", "VARCHAR(64)")  # Nouvel appareil en attente
+    _ensure_column("users", "pending_device_label", "VARCHAR(255)")
+    _ensure_column("users", "pending_fcm_token", "VARCHAR(512)")
+    _ensure_column("users", "device_changed_at", "VARCHAR(40)")
 
 
 def _ensure_column(table_name, column, coltype):
@@ -520,13 +532,22 @@ def touch_agent(agent_id):
 
 def _user_to_dict(r):
     """Convertit une ligne users en dictionnaire Python."""
+    def _g(key, default=None):
+        return r[key] if key in r.keys() else default
+
     return {  # Mapping des colonnes utilisateur
         "id": r["id"], "uid": r["uid"], "email": r["email"],  # Identifiants Firebase et e-mail
         "display_name": r["display_name"], "status": r["status"],  # Nom affiché et statut d'approbation
         "fcm_token": r["fcm_token"], "created_at": r["created_at"],  # Push token et date création
         "last_seen": r["last_seen"],  # Dernière activité
-        "ip": r["ip"] if "ip" in r else None,  # IP si colonne présente (compatibilité anciennes bases)
-        "approved_at": r["approved_at"] if "approved_at" in r else None,  # Date approbation si disponible
+        "ip": _g("ip"),  # IP si colonne présente (compatibilité anciennes bases)
+        "approved_at": _g("approved_at"),  # Date approbation si disponible
+        "device_id": _g("device_id"),
+        "device_label": _g("device_label"),
+        "pending_device_id": _g("pending_device_id"),
+        "pending_device_label": _g("pending_device_label"),
+        "pending_fcm_token": _g("pending_fcm_token"),
+        "device_changed_at": _g("device_changed_at"),
     }
 
 
@@ -615,6 +636,128 @@ def set_user_fcm_token(uid, token):
     """Enregistre ou remplace le jeton FCM pour les notifications push."""
     with engine.begin() as conn:  # Transaction
         conn.execute(sa_update(users).where(users.c.uid == uid).values(fcm_token=token))  # UPDATE fcm_token
+
+
+def register_device(uid, device_id, device_label=None, fcm_token=None):
+    """Enregistre l'appareil ou détecte un changement (mode strict).
+
+    Retourne un dict :
+      - first_device : premier appareil jamais vu pour ce compte ;
+      - device_changed : nouvel appareil différent de celui de confiance ;
+      - user : fiche à jour.
+
+    En cas de changement : le compte repasse en « pending », l'ancien
+    fcm_token est conservé pour notifier l'ancien téléphone, et le nouveau
+    appareil est stocké en pending_* jusqu'à approbation admin.
+    """
+    user = get_user_by_uid(uid)
+    if not user:
+        return None
+    device_id = (device_id or "").strip()
+    device_label = (device_label or "").strip()
+    if not device_id:
+        return {"first_device": False, "device_changed": False, "user": user}
+
+    stored = (user.get("device_id") or "").strip()
+    now = _now()
+
+    if not stored:
+        vals = {
+            "device_id": device_id,
+            "device_label": device_label or None,
+            "device_changed_at": now,
+            "pending_device_id": None,
+            "pending_device_label": None,
+            "pending_fcm_token": None,
+        }
+        if fcm_token:
+            vals["fcm_token"] = fcm_token
+        with engine.begin() as conn:
+            conn.execute(sa_update(users).where(users.c.uid == uid).values(**vals))
+        return {"first_device": True, "device_changed": False, "user": get_user_by_uid(uid)}
+
+    if stored == device_id:
+        vals = {}
+        if device_label and device_label != (user.get("device_label") or ""):
+            vals["device_label"] = device_label
+        if fcm_token:
+            vals["fcm_token"] = fcm_token
+        # Même appareil : annule un éventuel pending obsolète
+        if user.get("pending_device_id"):
+            vals["pending_device_id"] = None
+            vals["pending_device_label"] = None
+            vals["pending_fcm_token"] = None
+        if vals:
+            with engine.begin() as conn:
+                conn.execute(sa_update(users).where(users.c.uid == uid).values(**vals))
+        return {"first_device": False, "device_changed": False, "user": get_user_by_uid(uid)}
+
+    # Déjà le même appareil en attente : met à jour le FCM/libellé sans re-alerter
+    if (user.get("pending_device_id") or "").strip() == device_id:
+        vals = {"status": "pending"}
+        if device_label:
+            vals["pending_device_label"] = device_label
+        if fcm_token:
+            vals["pending_fcm_token"] = fcm_token
+        with engine.begin() as conn:
+            conn.execute(sa_update(users).where(users.c.uid == uid).values(**vals))
+        return {"first_device": False, "device_changed": False, "user": get_user_by_uid(uid)}
+
+    # Nouvel appareil ≠ appareil de confiance
+    vals = {
+        "pending_device_id": device_id,
+        "pending_device_label": device_label or None,
+        "device_changed_at": now,
+        "status": "pending",
+    }
+    if fcm_token:
+        vals["pending_fcm_token"] = fcm_token
+    with engine.begin() as conn:
+        conn.execute(sa_update(users).where(users.c.uid == uid).values(**vals))
+    return {"first_device": False, "device_changed": True, "user": get_user_by_uid(uid)}
+
+
+def approve_pending_device(uid):
+    """Valide le nouvel appareil en attente et ré-approuve le compte."""
+    user = get_user_by_uid(uid)
+    if not user:
+        return None
+    pending = (user.get("pending_device_id") or "").strip()
+    if not pending:
+        set_user_status(uid, "approved")
+        return get_user_by_uid(uid)
+    vals = {
+        "device_id": pending,
+        "device_label": user.get("pending_device_label"),
+        "pending_device_id": None,
+        "pending_device_label": None,
+        "status": "approved",
+        "approved_at": _now(),
+        "device_changed_at": _now(),
+    }
+    if user.get("pending_fcm_token"):
+        vals["fcm_token"] = user["pending_fcm_token"]
+        vals["pending_fcm_token"] = None
+    with engine.begin() as conn:
+        conn.execute(sa_update(users).where(users.c.uid == uid).values(**vals))
+    return get_user_by_uid(uid)
+
+
+def reject_pending_device(uid):
+    """Refuse le nouvel appareil ; restaure le compte si un appareil de confiance existe."""
+    user = get_user_by_uid(uid)
+    if not user:
+        return None
+    vals = {
+        "pending_device_id": None,
+        "pending_device_label": None,
+        "pending_fcm_token": None,
+    }
+    if user.get("device_id"):
+        vals["status"] = "approved"
+    with engine.begin() as conn:
+        conn.execute(sa_update(users).where(users.c.uid == uid).values(**vals))
+    return get_user_by_uid(uid)
 
 
 # --- Paramètres (clé/valeur) -----------------------------------------------
