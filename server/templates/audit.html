@@ -1,10 +1,13 @@
 {% extends "base.html" %}
 {% block title %}MoMoGuard — journal d'audit{% endblock %}
-{% block page_title %}Journal d'audit{% endblock %}
+{% block page_title %}Journal — audit{% endblock %}
 {% block page_sub %}Traçabilité des actions administrateur (non-répudiation){% endblock %}
 
 {% block content %}
   <main class="form-wrap wide">
+    <div class="actions" style="margin-bottom:16px;">
+      <a href="{{ url_for('attaques_elevees') }}" class="btn-link">Attaques élevées →</a>
+    </div>
     {% if not entries %}
       <p class="empty">Aucune action enregistrée pour l'instant.</p>
     {% else %}

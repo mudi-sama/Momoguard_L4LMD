@@ -285,6 +285,21 @@ def get_recent(limit=100):
     return [_report_to_dict(r) for r in rows]  # Transforme chaque ligne en dict enrichi
 
 
+def get_reports_by_level(level, limit=1000):
+    """Retourne les rapports d'un niveau donné (ex. « eleve »), du plus récent au plus ancien."""
+    level = (level or "").strip()
+    if not level:
+        return []
+    with engine.connect() as conn:
+        rows = conn.execute(
+            select(reports)
+            .where(reports.c.level == level)
+            .order_by(reports.c.id.desc())
+            .limit(limit)
+        ).mappings().all()
+    return [_report_to_dict(r) for r in rows]
+
+
 def get_reports_for_user(uid, limit=100):
     """Retourne les rapports associés à un UID Firebase donné."""
     with engine.connect() as conn:  # Connexion lecture

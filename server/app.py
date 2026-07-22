@@ -502,6 +502,125 @@ def export_reports_csv():  # Télécharge l'historique des alertes
     )
 
 
+def _build_xlsx(headers, rows):
+    """Construit un fichier .xlsx minimal (Open XML) sans dépendance externe."""
+    import io
+    import re
+    import zipfile
+    from xml.sax.saxutils import escape
+
+    def clean(value):
+        text = "" if value is None else str(value)
+        return re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", text)
+
+    def cell(ref, value):
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return f'<c r="{ref}"><v>{value}</v></c>'
+        return (
+            f'<c r="{ref}" t="inlineStr"><is><t>{escape(clean(value))}</t></is></c>'
+        )
+
+    def col_letter(n):
+        s = ""
+        while n:
+            n, r = divmod(n - 1, 26)
+            s = chr(65 + r) + s
+        return s
+
+    sheet_rows = []
+    for r_idx, row in enumerate([headers] + rows, start=1):
+        cells = []
+        for c_idx, value in enumerate(row, start=1):
+            ref = f"{col_letter(c_idx)}{r_idx}"
+            cells.append(cell(ref, value if value is not None else ""))
+        sheet_rows.append(f'<row r="{r_idx}">{"".join(cells)}</row>')
+
+    sheet_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+        f'<sheetData>{"".join(sheet_rows)}</sheetData></worksheet>'
+    )
+    workbook_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
+        'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+        '<sheets><sheet name="Attaques elevees" sheetId="1" r:id="rId1"/></sheets>'
+        '</workbook>'
+    )
+    rels_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        '<Relationship Id="rId1" '
+        'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" '
+        'Target="xl/workbook.xml"/>'
+        '</Relationships>'
+    )
+    wb_rels_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        '<Relationship Id="rId1" '
+        'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" '
+        'Target="worksheets/sheet1.xml"/>'
+        '</Relationships>'
+    )
+    content_types = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+        '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+        '<Default Extension="xml" ContentType="application/xml"/>'
+        '<Override PartName="/xl/workbook.xml" '
+        'ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+        '<Override PartName="/xl/worksheets/sheet1.xml" '
+        'ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+        '</Types>'
+    )
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("[Content_Types].xml", content_types)
+        zf.writestr("_rels/.rels", rels_xml)
+        zf.writestr("xl/workbook.xml", workbook_xml)
+        zf.writestr("xl/_rels/workbook.xml.rels", wb_rels_xml)
+        zf.writestr("xl/worksheets/sheet1.xml", sheet_xml)
+    return buf.getvalue()
+
+
+@app.route("/audit/attaques-elevees")
+@login_required
+def attaques_elevees():
+    """Sous-menu Journal : liste des alertes de niveau élevé."""
+    reports = database.get_reports_by_level("eleve", limit=1000)
+    return render_template("attaques_elevees.html", reports=reports)
+
+
+@app.route("/audit/attaques-elevees/export.xlsx")
+@login_required
+def export_attaques_elevees_xlsx():
+    """Exporte les alertes élevées au format Excel (.xlsx)."""
+    rows = database.get_reports_by_level("eleve", limit=5000)
+    headers = [
+        "id", "date", "agent", "plateforme", "type",
+        "niveau", "score", "categorie", "contenu", "raisons", "conseil", "uid",
+    ]
+    data = []
+    for r in rows:
+        data.append([
+            r["id"], r["created_at"], r["agent_id"], r["platform"],
+            r["event_type"], r["level"], r["score"], r.get("categorie") or "",
+            r["content"], " | ".join(r.get("reasons") or []),
+            r.get("conseil") or "", r.get("uid") or "",
+        ])
+    payload = _build_xlsx(headers, data)
+    _audit("Export Excel attaques élevées", details=f"{len(rows)} lignes")
+    return Response(
+        payload,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": "attachment; filename=momoguard_attaques_elevees.xlsx",
+        },
+    )
+
+
 # --- Menaces (threat intelligence) -----------------------------------------
 
 def _domaines_suspects(limit=100):  # Extrait les domaines des alertes à risque

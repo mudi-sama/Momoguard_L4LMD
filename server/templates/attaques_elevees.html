@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}MoMoGuard — attaques élevées{% endblock %}
+{% block page_title %}Attaques élevées{% endblock %}
+{% block page_sub %}Alertes de niveau élevé — export Excel pour dataset / rapport{% endblock %}
+
+{% block content %}
+  <main class="form-wrap wide">
+    <div class="actions" style="margin-bottom:16px; display:flex; flex-wrap:wrap; gap:10px; align-items:center;">
+      <a href="{{ url_for('export_attaques_elevees_xlsx') }}" class="btn-ghost ok">Exporter en Excel (.xlsx)</a>
+      <a href="{{ url_for('audit') }}" class="btn-link">← Journal d'audit</a>
+      <span class="muted">{{ reports|length }} alerte(s) élevée(s)</span>
+    </div>
+
+    {% if not reports %}
+      <p class="empty">Aucune alerte de niveau élevé pour l'instant. Envoie un SMS de test « élevé » pour en générer.</p>
+    {% else %}
+      <div class="card" style="padding:0; overflow:auto;">
+        <table class="log-table">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Score</th>
+              <th>Catégorie</th>
+              <th>Agent</th>
+              <th>Plateforme</th>
+              <th>Contenu</th>
+              <th>Raisons</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in reports %}
+            <tr>
+              <td class="mono">{{ r.created_at }}</td>
+              <td><span class="badge eleve">{{ r.score }}</span></td>
+              <td>{{ r.categorie or '—' }}</td>
+              <td class="mono">{{ r.agent_id }}</td>
+              <td>{{ r.platform }}</td>
+              <td>{{ (r.content or '')[:140] }}{% if (r.content or '')|length > 140 %}…{% endif %}</td>
+              <td>{{ (r.reasons or [])|join(' · ') }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endif %}
+  </main>
+{% endblock %}
