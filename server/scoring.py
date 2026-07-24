@@ -35,6 +35,10 @@ SENDERS_OFFICIELS = {
 SHORT_CODES_OFFICIELS = {
     "100", "111", "123", "124", "130", "144", "145", "149", "400", "425",
 }
+# MSISDN de confiance : messages classés « faible » (ex. téléphone de démo / contact sûr).
+NUMEROS_DE_CONFIANCE = {
+    "243854348028",
+}
 PACKAGES_OFFICIELS_PREFIXES = (
     "com.orange.", "com.airtel.", "com.vodacom.", "com.vodafone.",
     "com.africell.", "cd.orange.", "cd.airtel.", "cd.vodacom.",
@@ -120,15 +124,19 @@ def _normaliser_sender(valeur):
     return re.sub(r"[\s\-_.]+", "", brut)
 
 
-def est_canal_officiel(metadata=None):
-    """True si l'évènement vient d'un canal opérateur officiel (SMS ou app).
+def _normaliser_msisdn(valeur):
+    """Normalise un numéro (+243… / 0…) en chiffres internationaux sans +."""
+    digits = re.sub(r"\D", "", str(valeur or ""))
+    if digits.startswith("00"):
+        digits = digits[2:]
+    if len(digits) == 10 and digits.startswith("0"):
+        digits = "243" + digits[1:]
+    return digits
 
-    Un MSISDN personnel (+243…) n'est jamais considéré comme canal officiel.
-    """
+
+def _sources_expediteur(metadata):
+    """Collecte les champs d'expéditeur / app utiles pour le scoring."""
     metadata = metadata or {}
-    if str(metadata.get("filter_categorie", "")).upper() == "CONFIRMATION_OPERATEUR":
-        return True
-
     sources = [
         str(metadata.get("sender", "") or "").strip(),
         str(metadata.get("package", "") or "").strip(),
@@ -137,8 +145,32 @@ def est_canal_officiel(metadata=None):
         val = metadata.get(cle)
         if val:
             sources.append(str(val).strip())
+    return sources
 
-    for src in sources:
+
+def est_numero_de_confiance(metadata=None):
+    """True si l'expéditeur est un MSISDN explicitement de confiance."""
+    for src in _sources_expediteur(metadata):
+        if not src:
+            continue
+        if _normaliser_msisdn(src) in NUMEROS_DE_CONFIANCE:
+            return True
+    return False
+
+
+def est_canal_officiel(metadata=None):
+    """True si l'évènement vient d'un canal opérateur officiel (SMS ou app).
+
+    Un MSISDN personnel (+243…) n'est jamais considéré comme canal officiel,
+    sauf s'il figure dans NUMEROS_DE_CONFIANCE.
+    """
+    metadata = metadata or {}
+    if est_numero_de_confiance(metadata):
+        return True
+    if str(metadata.get("filter_categorie", "")).upper() == "CONFIRMATION_OPERATEUR":
+        return True
+
+    for src in _sources_expediteur(metadata):
         if not src:
             continue
         digits = re.sub(r"[\s\-]", "", src)
@@ -178,6 +210,11 @@ def score_event(event_type, content, metadata=None, thresholds=(25, 55)):
     """
     metadata = metadata or {}  # Métadonnées optionnelles (expéditeur, etc.) ; dict vide par défaut
     content = content or ""  # Contenu textuel ; chaîne vide si absent
+    # Numéro de confiance : toujours niveau faible (téléphone de démo / contact sûr).
+    if est_numero_de_confiance(metadata):
+        return 0, "faible", [
+            "Expéditeur de confiance (+243854348028) — niveau faible"
+        ]
     norm = _sans_accents(content)  # Version normalisée pour comparaisons insensibles aux accents
     score = 0  # Compteur cumulatif de points de risque
     reasons = []  # Liste des explications associées aux règles déclenchées

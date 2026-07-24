@@ -53,6 +53,21 @@ def test_usurpation_numero_personnel(mg):
     assert any("personnel" in r.lower() or "officiel" in r.lower() for r in reasons)
 
 
+def test_numero_de_confiance_toujours_faible(mg):
+    score, level, reasons = mg.scoring.score_event(
+        "sms",
+        "URGENT compte Orange Money bloque http://0range-money.tk",
+        {"sender": "+243854348028"},
+    )
+    assert score == 0
+    assert level == "faible"
+    assert any("confiance" in r.lower() for r in reasons)
+
+    _, level2, _ = mg.scoring.score_event(
+        "sms", "Salut", {"sender": "0854348028"})
+    assert level2 == "faible"
+
+
 def test_seuils_configurables(mg):
     _, niveau_defaut, _ = mg.scoring.score_event("sms", "envoie le code", thresholds=(25, 55))
     _, niveau_bas, _ = mg.scoring.score_event("sms", "envoie le code", thresholds=(5, 10))
