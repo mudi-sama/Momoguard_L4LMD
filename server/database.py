@@ -414,6 +414,28 @@ def update_admin_password(username, password_hash):
         )
 
 
+def rename_admin(old_username, new_username):
+    """Renomme un compte admin. Retourne (ok, message_erreur)."""
+    old_username = (old_username or "").strip()
+    new_username = (new_username or "").strip()
+    if not old_username or not new_username:
+        return False, "Identifiant manquant."
+    if old_username == new_username:
+        return True, None
+    if len(new_username) < 3 or len(new_username) > 191:
+        return False, "L'identifiant doit faire entre 3 et 191 caractères."
+    if get_admin(new_username):
+        return False, "Cet identifiant est déjà utilisé."
+    if not get_admin(old_username):
+        return False, "Compte introuvable."
+    with engine.begin() as conn:
+        conn.execute(
+            sa_update(admins).where(admins.c.username == old_username)
+            .values(username=new_username)
+        )
+    return True, None
+
+
 def set_admin_totp(username, secret):
     """Active (secret) ou désactive (None) la 2FA pour un administrateur."""
     with engine.begin() as conn:  # Transaction

@@ -30,6 +30,29 @@ def test_message_benin(mg):
     assert level == "faible"
 
 
+def test_faible_uniquement_canal_officiel(mg):
+    """Confirmation MM hors canal officiel → pas de niveau faible."""
+    texte = "Vous avez recu 50.000 FC. Nouveau solde: 175.000 FC."
+    _, level_hors, reasons = mg.scoring.score_event("sms", texte, {"sender": "+243990000000"})
+    assert level_hors == "moyen"
+    assert any("faible" in r.lower() or "officiel" in r.lower() for r in reasons)
+
+    _, level_officiel, _ = mg.scoring.score_event(
+        "sms", texte, {"sender": "OrangeMoney"})
+    assert level_officiel == "faible"
+
+
+def test_usurpation_numero_personnel(mg):
+    score, level, reasons = mg.scoring.score_event(
+        "sms",
+        "Orange Money: votre solde est disponible.",
+        {"sender": "+243812345678"},
+    )
+    assert score >= 15
+    assert level in ("moyen", "eleve")
+    assert any("personnel" in r.lower() or "officiel" in r.lower() for r in reasons)
+
+
 def test_seuils_configurables(mg):
     _, niveau_defaut, _ = mg.scoring.score_event("sms", "envoie le code", thresholds=(25, 55))
     _, niveau_bas, _ = mg.scoring.score_event("sms", "envoie le code", thresholds=(5, 10))

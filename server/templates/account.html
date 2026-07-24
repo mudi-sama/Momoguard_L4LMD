@@ -6,12 +6,28 @@
 {% block content %}
   <main class="form-wrap">
     <div class="card">
-      <h2>Changer le mot de passe</h2>
+      <h2>Identifiant de connexion</h2>
       <p class="lead">Connecté en tant que <strong>{{ username }}</strong>.</p>
-      {% if ok %}<p class="success">Mot de passe mis à jour.</p>{% endif %}
+      {% if ok %}<p class="success">{{ ok_msg or 'Mot de passe mis à jour.' }}</p>{% endif %}
       {% if erreur %}<p class="alert">{{ erreur }}</p>{% endif %}
       <form method="POST" action="{{ url_for('account') }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="action" value="username">
+        <label>Nouvel identifiant (e-mail ou pseudo)
+          <input type="text" name="nouveau_username" value="{{ username }}" autocomplete="username" required>
+        </label>
+        <label>Mot de passe actuel (confirmation)
+          <input type="password" name="actuel" autocomplete="current-password" required>
+        </label>
+        <button type="submit">Changer l'identifiant</button>
+      </form>
+    </div>
+
+    <div class="card" style="margin-top:16px;">
+      <h2>Changer le mot de passe</h2>
+      <form method="POST" action="{{ url_for('account') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="action" value="password">
         <label>Mot de passe actuel
           <input type="password" name="actuel" autocomplete="current-password" required>
         </label>

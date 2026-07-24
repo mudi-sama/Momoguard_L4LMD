@@ -49,9 +49,12 @@ if not _secret:
     _secret = secrets.token_hex(32)
     print("[!] MOMOGUARD_SECRET non défini — sessions invalidées à chaque redémarrage.")
 
+# En développement : "*" pour que le dashboard temps réel marche aussi via
+# l'IP LAN (http://192.168.x.x:5000), pas seulement 127.0.0.1.
+# En production : origines explicites via MOMOGUARD_CORS_ORIGINS.
 _cors_origins = os.environ.get(
     "MOMOGUARD_CORS_ORIGINS",
-    "http://127.0.0.1:5000,http://localhost:5000",
+    "*" if not _PRODUCTION else "http://127.0.0.1:5000,http://localhost:5000",
 )
 
 app = Flask(__name__)  # Instance principale de l'application Flask
@@ -73,8 +76,9 @@ app.config.update(
     WTF_CSRF_SSL_STRICT=False,
 )
 
-socketio = SocketIO(app, cors_allowed_origins=_cors_origins.split(","),
-                    async_mode="threading")  # Temps réel — CORS restreint
+_socketio_cors = "*" if _cors_origins.strip() == "*" else _cors_origins.split(",")
+socketio = SocketIO(app, cors_allowed_origins=_socketio_cors,
+                    async_mode="threading")  # Temps réel — CORS adapté au contexte
 
 # Protection CSRF des formulaires (les API JSON des agents sont exemptées plus bas)
 csrf = CSRFProtect(app)  # Active la vérification CSRF sur les POST HTML
@@ -256,10 +260,28 @@ def logout():
 
 @app.route("/account", methods=["GET", "POST"])  # Gestion du compte admin
 @login_required  # Admin connecté requis
-def account():  # Changement de mot de passe + lien 2FA
+def account():  # Changement de mot de passe / identifiant + lien 2FA
     username = session["admin"]  # Admin courant
     tfa = bool((database.get_admin(username) or {}).get("totp_secret"))  # 2FA active ?
-    if request.method == "POST":  # Soumission changement mot de passe
+    if request.method == "POST":
+        action = (request.form.get("action") or "password").strip()
+        if action == "username":
+            nouveau = (request.form.get("nouveau_username") or "").strip()
+            actuel = request.form.get("actuel") or ""
+            admin = database.get_admin(username)
+            if not admin or not check_password_hash(admin["password_hash"], actuel):
+                return render_template("account.html", username=username, twofa_active=tfa,
+                                       erreur="Mot de passe actuel incorrect.", ok=False)
+            ok, err = database.rename_admin(username, nouveau)
+            if not ok:
+                return render_template("account.html", username=username, twofa_active=tfa,
+                                       erreur=err, ok=False)
+            session["admin"] = nouveau
+            _audit("Changement d'identifiant admin", details=f"{username} → {nouveau}")
+            return render_template("account.html", username=nouveau, twofa_active=tfa,
+                                   erreur=None, ok=True,
+                                   ok_msg="Identifiant mis à jour. Utilise-le à la prochaine connexion.")
+        # Par défaut : changement de mot de passe
         actuel = request.form.get("actuel") or ""  # Mot de passe actuel
         nouveau = request.form.get("nouveau") or ""  # Nouveau mot de passe
         admin = database.get_admin(username)
@@ -733,17 +755,20 @@ def report():  # Traite un événement suspect remonté par un agent
     # Contrôle d'adhésion : le compte client doit être approuvé.
     user = database.get_user_by_uid(uid) if uid else None
     if user and user["status"] != "approved":
+        print(f"[report] REFUS {platform} uid={uid} statut={user['status']}")
         return jsonify({"error": _user_status_error(user["status"])}), 403
 
     if platform == "android":
         # Authentification par le COMPTE uniquement (Firebase) : pas de jeton d'agent.
         # L'identité vient de l'UID Firebase déjà vérifié ; le compte doit exister et être approuvé.
         if not user:
+            print(f"[report] REFUS android uid={uid} — compte inconnu")
             return jsonify({"error": "Compte non reconnu — connectez-vous d'abord"}), 403
         # L'appareil est rattaché au compte : identifiant dérivé de l'UID (anti-usurpation).
         agent_id = f"android-{uid}"
         agent = database.get_agent(agent_id)
         if agent and agent["status"] == "blocked":
+            print(f"[report] REFUS android agent={agent_id} — bloqué")
             return jsonify({"error": "Agent bloqué"}), 403
         if not agent:  # Auto-enregistrement léger pour l'affichage dans le dashboard (aucune config côté téléphone)
             libelle = user.get("display_name") or user.get("email") or agent_id
@@ -779,6 +804,8 @@ def report():  # Traite un événement suspect remonté par un agent
         uid=uid,
     )
     socketio.emit("new_report", saved)  # Push temps réel vers le dashboard
+    print(f"[report] OK agent={agent_id} platform={platform} "
+          f"niveau={level} score={score} id={saved['id']} → dashboard temps réel")
 
     # Notification push de danger au client concerné (alerte de niveau élevé).
     if level == "eleve" and user and user.get("fcm_token"):  # Alerte critique + push possible

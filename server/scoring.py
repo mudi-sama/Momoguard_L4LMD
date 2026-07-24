@@ -7,7 +7,8 @@ enregistrée dans `reasons` pour pouvoir EXPLIQUER la décision devant le jury.
 Améliorations de cette version :
   - détection des domaines sosies écrits en homoglyphes (0range, airte1, v0dacom) ;
   - correspondance des mots-clés insensible aux accents (gagne = gagné) ;
-  - bonus quand urgence et lien apparaissent ensemble (schéma d'arnaque classique).
+  - bonus quand urgence et lien apparaissent ensemble (schéma d'arnaque classique) ;
+  - niveau « faible » réservé aux canaux officiels des opérateurs (sender ID / app).
 """
 
 import re  # Expressions régulières pour extraire URLs, montants, USSD, numéros
@@ -17,12 +18,33 @@ import unicodedata  # Normalisation Unicode pour ignorer les accents à la compa
 
 OPERATEURS = ["orange", "airtel", "vodacom", "mpesa", "africell", "illico"]  # Noms d'opérateurs locaux
 
-# Domaines officiels 
-DOMAINES_OFFICIELS = ["orange.cd", "airtel.cd", "vodacom.cd", "africell.cd"]  
+# Domaines officiels
+DOMAINES_OFFICIELS = ["orange.cd", "airtel.cd", "vodacom.cd", "africell.cd"]
 
 TLD_SUSPECTS = [".xyz", ".top", ".tk", ".ml", ".ga", ".cf", ".gq", ".click", ".link"]  # Extensions souvent abusées
 
 RACCOURCISSEURS = ["bit.ly", "tinyurl.com", "t.co", "goo.gl", "ow.ly", "is.gd", "cutt.ly"]  # Services qui masquent l'URL réelle
+
+# Sender ID officiels (normalisés), short codes et apps Android — RDC / calibration.
+SENDERS_OFFICIELS = {
+    "orange", "orangemoney", "orangemoneyrdc", "omoney", "orangerdc",
+    "airtel", "airtelmoney", "airtelmoneydrc", "airtelrdc",
+    "vodacom", "vodacomrdc", "mpesa", "mpesardc", "vodacommpesa",
+    "africell", "afrimoney", "africellmoney", "africellrdc",
+}
+SHORT_CODES_OFFICIELS = {
+    "100", "111", "123", "124", "130", "144", "145", "149", "400", "425",
+}
+PACKAGES_OFFICIELS_PREFIXES = (
+    "com.orange.", "com.airtel.", "com.vodacom.", "com.vodafone.",
+    "com.africell.", "cd.orange.", "cd.airtel.", "cd.vodacom.",
+)
+MOTS_MOBILE_MONEY = [
+    "orange money", "airtel money", "m-pesa", "mpesa", "africell", "afrimoney",
+    "mobile money", "solde", "transfert", "transaction", "retrait", "depot",
+    "porte-monnaie", "vous avez recu", "vous avez envoye", "code pin",
+    "code secret", "otp", "ussd",
+]
 
 # Mots-clés écrits SANS accent : la comparaison se fait sur du texte normalisé.
 MOTS_CLES_FRAUDE = [  # Lexique typique des arnaques par SMS/message
@@ -92,16 +114,74 @@ def _domaine_nettoye(domain):
     return re.sub(r"[^a-z]", "", deleet)  # Ne conserve que les lettres minuscules a-z
 
 
+def _normaliser_sender(valeur):
+    """Normalise un expéditeur / package pour comparaison."""
+    brut = _sans_accents(str(valeur or "").strip())
+    return re.sub(r"[\s\-_.]+", "", brut)
+
+
+def est_canal_officiel(metadata=None):
+    """True si l'évènement vient d'un canal opérateur officiel (SMS ou app).
+
+    Un MSISDN personnel (+243…) n'est jamais considéré comme canal officiel.
+    """
+    metadata = metadata or {}
+    if str(metadata.get("filter_categorie", "")).upper() == "CONFIRMATION_OPERATEUR":
+        return True
+
+    sources = [
+        str(metadata.get("sender", "") or "").strip(),
+        str(metadata.get("package", "") or "").strip(),
+    ]
+    for cle in ("from", "address", "app_name"):
+        val = metadata.get(cle)
+        if val:
+            sources.append(str(val).strip())
+
+    for src in sources:
+        if not src:
+            continue
+        digits = re.sub(r"[\s\-]", "", src)
+        if NUMERO_REGEX.fullmatch(digits):
+            continue
+        norm = _normaliser_sender(src)
+        if not norm:
+            continue
+        if norm in SENDERS_OFFICIELS or norm in SHORT_CODES_OFFICIELS:
+            return True
+        pkg = src.lower().strip()
+        if any(pkg.startswith(p) for p in PACKAGES_OFFICIELS_PREFIXES):
+            return True
+        if any(norm.startswith(s) and len(norm) <= len(s) + 6 for s in SENDERS_OFFICIELS):
+            return True
+    return False
+
+
+def _concerne_mobile_money(norm):
+    """True si le texte évoque le Mobile Money / un opérateur."""
+    if any(m in norm for m in MOTS_MOBILE_MONEY):
+        return True
+    if any(op in norm for op in OPERATEURS):
+        return True
+    if MONTANT_REGEX.search(norm) or USSD_REGEX.search(norm):
+        return True
+    return False
+
+
 def score_event(event_type, content, metadata=None, thresholds=(25, 55)):
     """Analyse un évènement et renvoie (score, niveau, raisons).
 
     thresholds = (seuil_moyen, seuil_eleve) : bornes configurables des niveaux.
+
+    Politique « faible » : pour le Mobile Money, le niveau faible n'est accordé
+    que si le message est émis depuis un canal officiel (sender ID / app).
     """
     metadata = metadata or {}  # Métadonnées optionnelles (expéditeur, etc.) ; dict vide par défaut
     content = content or ""  # Contenu textuel ; chaîne vide si absent
     norm = _sans_accents(content)  # Version normalisée pour comparaisons insensibles aux accents
     score = 0  # Compteur cumulatif de points de risque
     reasons = []  # Liste des explications associées aux règles déclenchées
+    officiel = est_canal_officiel(metadata)
 
     # 1) Analyse des liens / URLs ------------------------------------------
     urls = URL_REGEX.findall(content)  # Extrait toutes les URLs présentes dans le message
@@ -149,11 +229,21 @@ def score_event(event_type, content, metadata=None, thresholds=(25, 55)):
         score += 12  # Bonus combo : schéma classique de hameçonnage
         reasons.append("Sentiment d'urgence combiné à un lien (pression typique d'arnaque)")
 
-    # 4) Expéditeur usurpé --------------------------------------------------
+    # 4) Expéditeur hors canal officiel ------------------------------------
     sender = str(metadata.get("sender", "")).strip()  # Numéro ou identifiant de l'expéditeur, nettoyé
-    if sender and NUMERO_REGEX.fullmatch(sender) and any(op in norm for op in OPERATEURS):  # Numéro perso + mention opérateur
-        score += 15  # Pénalité : usurpation d'identité d'opérateur depuis un mobile personnel
-        reasons.append(f"Message au nom d'un opérateur envoyé depuis un numéro personnel ({sender})")
+    evoque_operateur = any(op in norm for op in OPERATEURS)
+    if not officiel and evoque_operateur:
+        if sender and NUMERO_REGEX.fullmatch(re.sub(r"[\s\-]", "", sender)):
+            score += 20  # Usurpation depuis un mobile personnel
+            reasons.append(
+                f"Message au nom d'un opérateur envoyé depuis un numéro personnel ({sender})"
+            )
+        else:
+            score += 15
+            reasons.append(
+                "Message évoquant un opérateur hors canal officiel "
+                "(sender ID / application non reconnus)"
+            )
 
     # 5) Code USSD à risque -------------------------------------------------
     if USSD_REGEX.search(content):  # Présence d'une séquence USSD dans le texte brut
@@ -211,12 +301,28 @@ def score_event(event_type, content, metadata=None, thresholds=(25, 55)):
     # --- Bornage et niveau -------------------------------------------------
     seuil_moyen, seuil_eleve = thresholds  # Dépaquette les deux seuils configurables
     score = max(0, min(score, 100))  # Borne le score entre 0 et 100 inclus
-    if score >= seuil_eleve:  # Score au-dessus du seuil « élevé »
-        level = "eleve"  # Niveau de risque maximal
-    elif score >= seuil_moyen:  # Score entre seuil moyen et élevé
-        level = "moyen"  # Niveau de risque intermédiaire
-    else:  # Score sous le seuil moyen
-        level = "faible"  # Niveau de risque minimal
+
+    # Politique : « faible » uniquement depuis un canal opérateur officiel
+    # pour tout message lié au Mobile Money / aux opérateurs.
+    if score < seuil_moyen:
+        if officiel:
+            level = "faible"
+            if not reasons or reasons == ["Aucun signal suspect détecté"]:
+                reasons = ["Aucun signal suspect — canal opérateur officiel"]
+            elif "canal opérateur officiel" not in " ".join(reasons).lower():
+                reasons.append("Canal opérateur officiel reconnu")
+        elif _concerne_mobile_money(norm):
+            score = max(score, seuil_moyen)
+            level = "moyen"
+            reasons.append(
+                "Niveau faible refusé : réservé aux SMS/apps officiels des opérateurs"
+            )
+        else:
+            level = "faible"
+    elif score >= seuil_eleve:
+        level = "eleve"
+    else:
+        level = "moyen"
 
     if not reasons:  # Aucune règle n'a produit d'explication
         reasons.append("Aucun signal suspect détecté")  # Message par défaut pour traçabilité
